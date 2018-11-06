@@ -13,11 +13,105 @@ Scenario: arrays returned from js can be modified using 'set'
     * set json[1].a = 5
     * match json == [{a: 1}, {a: 5}, {b: 3}]
 
+Scenario: json behaves like a java map within functions
+    * def payload = { a: 1, b: 2 }
+    * def keys = function(obj){ return payload.keySet() }
+    * def values = function(obj){ return payload.values() }
+    * json result = keys(payload)
+    * match result == ['a', 'b']
+    * json result = values(payload)
+    * match result == [1, 2]
+
 Scenario: json-path can be performed in js
     * def json = [{foo: 1}, {foo: 2}]
     * def fun = function(arg) { return karate.jsonPath(arg, '$[*].foo') }
     * def res = call fun json
     * match res == [1, 2]
+    # json-path in the form $varname.blah
+    * def foo = { bar: [{baz: 1}, {baz: 2}, {baz: 3}]}
+    * def fun = function(){ return karate.get('$foo.bar[*].baz') }
+    * def res = call fun
+    * match res == [1, 2, 3]
+
+Scenario: this seems to be a bug in Nashorn, refer: https://github.com/intuit/karate/issues/225
+    adding this test to detect if ever the JDK behavior changes
+    * def actual = ({ a: [1, 2, 3]})
+    * match actual == { a: { '0': 1, '1': 2, '2': 3 }}
+    * def temp = [1, 2, 3]
+    * def actual = ({ a: temp })
+    * match actual == { a: [1, 2, 3] }
+
+Scenario: karate forEach operation on lists
+    * def res = []
+    * def fun = function(x){ res.add(x * x) }
+    * def list = [1, 2, 3]
+    * eval karate.forEach(list, fun)
+    * match res == [1, 4, 9]
+
+Scenario: karate forEach operation on maps (json)
+    * def keys = []
+    * def vals = []
+    * def idxs = []
+    * def fun = function(x, y, i){ keys.add(x); vals.add(y); idxs.add(i) }
+    * def map = { a: 2, b: 4, c: 6 }
+    * eval karate.forEach(map, fun)
+    * match keys == ['a', 'b', 'c']
+    * match vals == [2, 4, 6]
+    * match idxs == [0, 1, 2]
+
+Scenario: karate map operation
+    * def fun = function(x){ return x * x }
+    * def list = [1, 2, 3]
+    * def res = karate.map(list, fun)
+    * match res == [1, 4, 9]
+
+Scenario: karate filter operation
+    * def fun = function(x){ return x % 2 == 0 }
+    * def list = [1, 2, 3, 4]
+    * def res = karate.filter(list, fun)
+    * match res == [2, 4]
+
+Scenario: karate filter operation, using array indexes
+    * def fun = function(x, i){ return i % 2 == 0 }
+    * def list = [1, 2, 3, 4]
+    * def res = karate.filter(list, fun)
+    * match res == [1, 3]
+
+Scenario: get last array element (js)
+    * def list = [1, 2, 3, 4]
+    * def last = list[list.length-1]
+    * match last == 4
+
+Scenario: get last array element (json-path)
+    * def list = [1, 2, 3, 4]
+    * def last = get[0] list[-1:]
+    * match last == 4
+
+Scenario: advanced json-path that the jayway implementation has limitations with
+    * def response = read('products.json')
+    * def result = $[?(@.partIDs[?(@.id == 1)])]
+    # should be 2
+    * match result == '#[3]'
+
+Scenario: work around for the above
+    * def hasId = 
+        """
+        function(product, id) {
+            return karate.jsonPath(product, '$.partIDs[?(@.id==' + id + ')]').length;
+        }
+        """
+    * def products = read('products.json')
+    * def result = []
+    * eval for(var i = 0; i < products.length; i++) if (hasId(products[i], 1)) result.add(products[i]) 
+    # >
+    * match result[*].name == ['Wotsit v1.5', 'Wotsit v2.5']
+
+Scenario: work around but using karate.filter
+    * def id = 1
+    * def hasId = function(x){ return karate.jsonPath(x, '$.partIDs[?(@.id==' + id + ')]').length }
+    * def products = read('products.json')
+    * def result = karate.filter(products, hasId)
+    * match result[*].name == ['Wotsit v1.5', 'Wotsit v2.5']
 
 Scenario: table to json with expressions evaluated
     * def one = 'hello'
@@ -27,6 +121,15 @@ Scenario: table to json with expressions evaluated
         | one     | 1   |
         | two.baz | 2   |
     * match json == [{ foo: 'hello', bar: 1 }, { foo: 'world', bar: 2 }]
+
+Scenario: table to json with expressions and empty / nulls
+    * def one = { baz: null }
+    * table json
+        | foo     | bar    |
+        | 'hello' |        |
+        | one.baz | (null) |
+        | 'world' | null   |
+    * match json == [{ foo: 'hello' }, { bar: null }, { foo: 'world' }]
 
 Scenario: table to json with nested json
     * def one = 'hello'
@@ -75,6 +178,43 @@ Scenario: optional json values
     * def response = [{a: 'one', b: 'two'}, { a: 'one' }]
     * match each response contains { a: 'one', b: '##("two")' }
 
+Scenario: #null, ##null, #present and #notpresent
+    * def foo = { }
+    * match foo != { a: '#present' }
+    * match foo == { a: '#notpresent' }
+    * match foo == { a: '#ignore' }
+    * match foo == { a: '##null' }
+    * match foo != { a: '#null' }
+    * match foo != { a: '#notnull' }
+    * match foo == { a: '##notnull' }
+    * match foo != { a: null }
+
+    * def foo = { a: null }
+    * match foo == { a: null }
+    * match foo == { a: '#null' }    
+    * match foo == { a: '##null' }
+    * match foo != { a: '#notnull' }
+    * match foo != { a: '##notnull' }
+    * match foo == { a: '#present' }
+    * match foo == { a: '#ignore' }
+    * match foo != { a: '#notpresent' }
+
+    * def foo = { a: 1 }
+    * match foo == { a: 1 }
+    * match foo == { a: '#number' }
+    * match foo == { a: '#notnull' }
+    * match foo == { a: '##notnull' }
+    * match foo != { a: '#null' }    
+    * match foo != { a: '##null' }
+    * match foo == { a: '#present' }
+    * match foo == { a: '#ignore' }
+    * match foo != { a: '#notpresent' }
+
+Scenario: alternative notpresent check using json-path
+    * def foo = { a: 1 }
+    * match foo.a == '#present'
+    * match foo.nope == '#notpresent'
+
 Scenario: get and json path
     * def foo = { bar: { baz: 'ban' } }
     * def res = get foo $..bar[?(@.baz)]
@@ -92,13 +232,6 @@ Scenario: js eval
     * assert celsius == 100
     * string expression = 'temperature.celsius * 1.8 + 32'
     * match temperature.fahrenheit == karate.eval(expression)
-
-Scenario: js and numbers - float vs int
-    * def foo = parseInt('10')
-    * string json = { bar: '#(foo)' }
-    * match json == '{"bar":10.0}'
-    * string json = { bar: '#(~~foo)' }
-    * match json == '{"bar":10}'
 
 Scenario: js match is strict for data types
     * def foo = { a: '5', b: 5, c: true, d: 'true' }
@@ -170,6 +303,14 @@ Scenario: set via table with fancy array paths and multi-dimensional arrays
     | c[1]   | [3, 4]  |   
     * match foo == { bar: [ 'baz'], a: [{ b: 'ban' }], c: [[1, 2], [3, 4]] }
 
+Scenario: set via table, complex paths
+    * set expected
+    | path            | value   |
+    | first           | 'hello' |
+    | client.id       | 'goodbye'            |
+    | client.foo.bar  | 'world' |
+    * match expected == { first: 'hello', client: { id: 'goodbye', foo: { bar: 'world' }}}
+
 Scenario: set array via table where variable does not exist
     * set foo
     | path | 0     |
@@ -207,11 +348,20 @@ Scenario: set via table, var does not exist, different nesting options
     | two  | { bar: 'ban' } |
     * match first == { one: { bar: 'baz' }, two: { bar: 'ban' } }
 
-* set second
+    * set second
     | path     | value |
     | one.bar  | 'baz' |
     | two.bar  | 'ban' |
     * match second == first
+
+Scenario: set via table, repeated paths at the top
+    * set foo.bar
+    | path   | value |
+    | one    | 1     |
+    | two[0] | 2     |
+    | two[1] | 3     |
+
+    * match foo == { bar: { one: 1, two: [2, 3] } }
 
 Scenario Outline: examples and optional json keys
     * def search = { name: { first: "##(<first>)", last: "##(<last>)" }, age: "##(<age>)" }
@@ -264,3 +414,23 @@ Scenario: just to be clear about how to set a null if really needed in the resul
         | age        |        |
     
     * match foo == { name: { last: null } }
+
+Scenario: read json within a js function
+    * def fun = function(){ var temp = karate.read('classpath:test.json'); return temp.error[1].id }
+    * def val = call fun
+    * match val == 2
+
+Scenario: contains / not contains
+    * def some = [1, 2]
+    * def actual = [1, 2, 3]
+    * def none = [4, 5]
+    * match actual contains some
+    * match actual == '#(^some)'
+    * match actual !contains none
+    * match actual == '#(!^none)'
+
+Scenario: match in js
+    * def foo = { hello: 'world' }
+    * def result = karate.match(foo, { hello: '#string'} )
+    * match result == { pass: true, message: null }
+    * eval if (result.pass) karate.log('*** passed')

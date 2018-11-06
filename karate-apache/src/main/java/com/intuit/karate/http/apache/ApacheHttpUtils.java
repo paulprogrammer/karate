@@ -31,6 +31,7 @@ import com.intuit.karate.http.MultiPartItem;
 import com.intuit.karate.http.MultiValuedMap;
 import java.io.ByteArrayOutputStream;
 import java.io.InputStream;
+import java.nio.charset.Charset;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -38,6 +39,7 @@ import org.apache.http.HttpEntity;
 import org.apache.http.NameValuePair;
 import org.apache.http.client.entity.UrlEncodedFormEntity;
 import org.apache.http.entity.ContentType;
+import org.apache.http.entity.InputStreamEntity;
 import org.apache.http.entity.StringEntity;
 import org.apache.http.entity.mime.FormBodyPartBuilder;
 import org.apache.http.entity.mime.MultipartEntityBuilder;
@@ -66,7 +68,56 @@ public class ApacheHttpUtils {
         }        
     }
     
-    public static HttpEntity getEntity(MultiValuedMap fields, String mediaType) {
+    // all this complexity is to be able to support "bad" values such as an empty string
+    private static ContentType getContentType(String mediaType, Charset charset) {
+        if (!HttpUtils.isPrintable(mediaType)) {
+            try {
+                return ContentType.create(mediaType);
+            } catch (Exception e) {                
+                return null;
+            }
+        }
+        Map<String, String> map = HttpUtils.parseContentTypeParams(mediaType);
+        if (map != null) {
+            String cs = map.get(HttpUtils.CHARSET);
+            if (cs != null) {
+                charset = Charset.forName(cs);
+                map.remove(HttpUtils.CHARSET);
+            }
+        }
+        ContentType ct = ContentType.parse(mediaType).withCharset(charset);
+        if (map != null) {
+            for (Map.Entry<String, String> entry : map.entrySet()) {
+                ct = ct.withParameters(new BasicNameValuePair(entry.getKey(), entry.getValue()));
+            }
+        }
+        return ct;
+    }
+    
+    public static HttpEntity getEntity(InputStream is, String mediaType, Charset charset) {
+        try {
+            return new InputStreamEntity(is, is.available(), getContentType(mediaType, charset));
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }         
+    }    
+    
+    public static HttpEntity getEntity(String value, String mediaType, Charset charset) {
+        try {
+            ContentType ct = getContentType(mediaType, charset);
+            if (ct == null) { // "bad" value such as an empty string
+                StringEntity entity = new StringEntity(value);
+                entity.setContentType(mediaType);
+                return entity;
+            } else {
+                return new StringEntity(value, ct);
+            }            
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }         
+    }
+    
+    public static HttpEntity getEntity(MultiValuedMap fields, String mediaType, Charset charset) {
         List<NameValuePair> list = new ArrayList<>(fields.size());
         for (Map.Entry<String, List> entry : fields.entrySet()) {
             String stringValue;
@@ -88,15 +139,17 @@ public class ApacheHttpUtils {
             list.add(new BasicNameValuePair(entry.getKey(), stringValue));
         }
         try {
-            UrlEncodedFormEntity entity = new UrlEncodedFormEntity(list);
-            entity.setContentType(mediaType);
-            return entity;
+            Charset cs = HttpUtils.parseContentTypeCharset(mediaType);
+            if (cs == null) {
+                cs = charset;
+            }            
+            return new UrlEncodedFormEntity(list, cs);
         } catch (Exception e) {
             throw new RuntimeException(e);
         }
     }
 
-    public static HttpEntity getEntity(List<MultiPartItem> items, String mediaType) {
+    public static HttpEntity getEntity(List<MultiPartItem> items, String mediaType, Charset charset) {
         boolean hasNullName = false;
         for (MultiPartItem item : items) {
             if (item.getName() == null) {
@@ -107,10 +160,10 @@ public class ApacheHttpUtils {
         if (hasNullName) { // multipart/related
             String boundary = HttpUtils.generateMimeBoundaryMarker();
             String text = HttpUtils.multiPartToString(items, boundary);
-            ContentType ct = ContentType.create(mediaType).withParameters(new BasicNameValuePair("boundary", boundary));
+            ContentType ct = ContentType.parse(mediaType).withParameters(new BasicNameValuePair("boundary", boundary));
             return new StringEntity(text, ct);
         } else {
-            MultipartEntityBuilder builder = MultipartEntityBuilder.create().setContentType(ContentType.create(mediaType));
+            MultipartEntityBuilder builder = MultipartEntityBuilder.create().setContentType(ContentType.parse(mediaType));
             for (MultiPartItem item : items) {
                 if (item.getValue() == null || item.getValue().isNull()) {
                     continue;
@@ -124,8 +177,15 @@ public class ApacheHttpUtils {
                     String ct = item.getContentType();                    
                     if (ct == null) {
                         ct = HttpUtils.getContentType(sv);
-                    }                    
+                    }
                     ContentType contentType = ContentType.create(ct);
+                    if (HttpUtils.isPrintable(ct)) {
+                        Charset cs = HttpUtils.parseContentTypeCharset(mediaType);
+                        if (cs == null) {
+                            cs = charset;
+                        }
+                        contentType = contentType.withCharset(cs);                         
+                    }                   
                     FormBodyPartBuilder formBuilder = FormBodyPartBuilder.create().setName(name);
                     ContentBody contentBody;
                     String filename = item.getFilename();
@@ -134,7 +194,7 @@ public class ApacheHttpUtils {
                         contentBody = new InputStreamBody(is, contentType, filename);
                     } else if (sv.isStream()) {
                         contentBody = new InputStreamBody(sv.getAsStream(), contentType);
-                    } else {                    
+                    } else {
                         contentBody = new StringBody(sv.getAsString(), contentType);
                     }
                     formBuilder = formBuilder.setBody(contentBody);

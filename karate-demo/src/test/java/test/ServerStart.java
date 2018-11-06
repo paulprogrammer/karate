@@ -73,11 +73,6 @@ public class ServerStart {
         return port;
     }
 
-    public void stop() {
-        logger.info("stopping spring context");
-        context.stop();
-    }
-
     @Test
     public void startServer() throws Exception {
         start(new String[]{}, true);

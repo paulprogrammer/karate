@@ -23,7 +23,7 @@
  */
 package com.intuit.karate.ui;
 
-import com.intuit.karate.cucumber.CucumberUtils;
+import com.intuit.karate.cucumber.AsyncScenario;
 import com.intuit.karate.cucumber.FeatureSection;
 import com.intuit.karate.cucumber.KarateBackend;
 import com.intuit.karate.cucumber.ScenarioOutlineWrapper;
@@ -43,7 +43,7 @@ public class AppSessionTest {
     
     @Test
     public void testRunning() {
-        File tempFile = new File("src/test/java/feature/test.feature");
+        File tempFile = new File("src/test/java/com/intuit/karate/ui/test.feature");
         AppSession session = new AppSession(tempFile, null, true);
         for (FeatureSection section : session.getFeature().getSections()) {
             if (section.isOutline()) {
@@ -58,7 +58,8 @@ public class AppSessionTest {
     }
     
     private static void call(ScenarioWrapper scenario, KarateBackend backend) {
-        CucumberUtils.call(scenario, backend);
+        AsyncScenario as = new AsyncScenario(scenario, backend);
+        as.submit(r -> r.run(), (r, e) -> {});
     }    
     
 }

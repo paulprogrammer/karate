@@ -31,12 +31,21 @@ import org.springframework.security.config.annotation.web.configuration.WebSecur
  *
  * @author pthomas3
  */
- @Configuration
+@Configuration
 public class WebSecurityConfig extends WebSecurityConfigurerAdapter {
 
     @Override
     protected void configure(HttpSecurity http) throws Exception {
-        http.csrf().ignoringAntMatchers("/cats/**", "/dogs/**", "/files/**");
+        http.csrf().ignoringAntMatchers(
+                "/cats/**",
+                "/dogs/**",
+                "/files/**",
+                "/search/**",
+                "/redirect/**",
+                "/graphql/**",
+                "/soap/**",
+                "/echo/**"
+        );
     }
-    
+
 }

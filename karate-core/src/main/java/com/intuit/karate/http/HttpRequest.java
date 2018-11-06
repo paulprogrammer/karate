@@ -23,189 +23,97 @@
  */
 package com.intuit.karate.http;
 
-import com.intuit.karate.ScriptValue;
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Map;
 
 /**
- *
+ * this is only for capturing what was actually sent on the wire, read-only
+ * 
  * @author pthomas3
  */
 public class HttpRequest {
+    
+    private long startTime;
+    private long endTime;
+    private String urlBase; // used in mock since uri may start with '/'
+    private String uri; // will be full uri including query string
+    private String method;    
+    private MultiValuedMap headers = new MultiValuedMap();
+    private MultiValuedMap params; // only used in mock
+    private byte[] body;
 
-    private String url;
-    private List<String> paths;
-    private MultiValuedMap headers;
-    private MultiValuedMap params;
-    private Map<String, Cookie> cookies;
-    private MultiValuedMap formFields;
-    private List<MultiPartItem> multiPartItems;
-    private ScriptValue body;
-    private String method;
-    private String soapAction;
+    public long getStartTime() {
+        return startTime;
+    }
+    
+    public void setStartTime(long startTime) {
+        this.startTime = startTime;
+    }    
 
-    public void setUrl(String url) {
-        this.url = url;
+    public long getEndTime() {
+        return endTime;
+    }    
+    
+    public void setEndTime(long endTime) {
+        this.endTime = endTime;
+    }    
+    
+    public String getUrlBase() {
+        return urlBase;
     }
 
-    public String getUrl() {
-        return url;
+    public void setUrlBase(String urlBase) {
+        this.urlBase = urlBase;
+    }        
+    
+    public void addHeader(String key, String value) {
+        headers.add(key, value);
     }
-
-    public void addPath(String path) {
-        if (paths == null) {
-            paths = new ArrayList<>();
-        }
-        paths.add(path);
-    }
-
-    public List<String> getPaths() {
-        return paths;
-    }
-
-    public void removeHeader(String name) {
-        if (headers == null) {
-            return;
-        }
-        headers.remove(name);
-    }
-
-    public void setHeader(String name, String value) {
-        setHeader(name, Collections.singletonList(value));
-    }
-
-    public void setHeader(String name, List<String> values) {
-        if (headers == null) {
-            headers = new MultiValuedMap();
-        }
-        headers.put(name, values);
-    }
-
-    public MultiValuedMap getHeaders() {
-        return headers;
-    }
-
-    public void removeParam(String name) {
-        if (params == null) {
-            return;
-        }
-        params.remove(name);
-    }
-
-    public void setParam(String name, String value) {
-        setParam(name, Collections.singletonList(value));
-    }
-
-    public void setParam(String name, List<String> values) {
-        if (params == null) {
-            params = new MultiValuedMap();
-        }
-        params.put(name, values);
+    
+    public void putHeader(String key, List<String> values) {
+        headers.put(key, values);
     }
 
     public MultiValuedMap getParams() {
         return params;
-    }
-
-    public void removeCookie(String name) {
-        if (cookies == null) {
-            return;
-        }
-        cookies.remove(name);
-    }
-
-    public void setCookie(Cookie cookie) {
-        if (cookies == null) {
-            cookies = new LinkedHashMap<>();
-        }
-        cookies.put(cookie.getName(), cookie);
-    }
-
-    public Map<String, Cookie> getCookies() {
-        return cookies;
-    }
-
-    public void setCookies(Map<String, Cookie> cookies) {
-        this.cookies = cookies;
-    }
-
-    public void removeFormField(String name) {
-        if (formFields == null) {
-            return;
-        }
-        formFields.remove(name);
-    }
-
-    public void setFormField(String name, String value) {
-        setFormField(name, Collections.singletonList(value));
-    }
-
-    public void setFormField(String name, List<String> values) {
-        if (formFields == null) {
-            formFields = new MultiValuedMap();
-        }
-        formFields.put(name, values);
-    }
-
-    public MultiValuedMap getFormFields() {
-        return formFields;
-    }
-
-    public void addMultiPartItem(String name, ScriptValue value) {
-        MultiPartItem item = new MultiPartItem(name, value);
-        if (value.isStream()) { // short-cut, assume that intent is file-upload
-            item.setFilename(name);
-        }
-        addMultiPartItem(item);
-    }
+    }        
     
-    public void addMultiPartItem(MultiPartItem item) {
-        if (multiPartItems == null) {
-            multiPartItems = new ArrayList<>();
+    public void putParam(String key, List<String> values) {
+        if (params == null) {
+            params = new MultiValuedMap();
         }
-        multiPartItems.add(item);
-    }
-
-    public List<MultiPartItem> getMultiPartItems() {
-        return multiPartItems;
-    }
-
-    public ScriptValue getBody() {
-        return body;
-    }
-
-    public void setBody(ScriptValue body) {
-        this.body = body;
-    }
-
-    public void setMethod(String method) {
-        this.method = method;
+        params.put(key, values);
     }
 
     public String getMethod() {
         return method;
     }
 
-    public String getContentType() {
-        if (headers == null) {
-            return null;
-        }
-        Object contentType = headers.getFirst("Content-Type");
-        if (contentType == null) {
-            return null;
-        }
-        return contentType.toString();
+    public void setMethod(String method) {
+        this.method = method;
     }
 
-    public void setSoapAction(String soapAction) {
-        this.soapAction = soapAction;
+    public String getUri() {
+        return uri;
     }
 
-    public String getSoapAction() {
-        return soapAction;
+    public void setUri(String uri) {
+        this.uri = uri;
     }
 
+    public MultiValuedMap getHeaders() {
+        return headers;
+    }
+
+    public void setHeaders(MultiValuedMap headers) {
+        this.headers = headers;
+    }
+
+    public byte[] getBody() {
+        return body;
+    }
+
+    public void setBody(byte[] body) {
+        this.body = body;
+    }        
+    
 }

@@ -23,6 +23,7 @@
  */
 package com.intuit.karate.ui;
 
+import com.intuit.karate.ScriptBindings;
 import javafx.event.ActionEvent;
 import javafx.event.EventHandler;
 import javafx.geometry.Insets;
@@ -47,6 +48,7 @@ public class HeaderPanel extends BorderPane {
     private final HBox content;
     private final AppSession session;    
     private final MenuItem openFileMenuItem;
+    private final MenuItem openDirectoryMenuItem;
     private final MenuItem openImportMenuItem;
     private final TextArea textContent;
     
@@ -77,6 +79,9 @@ public class HeaderPanel extends BorderPane {
         openFileMenuItem = new MenuItem("Open");
         fileMenu.getItems().addAll(openFileMenuItem);
 
+        openDirectoryMenuItem = new MenuItem("Load Directory");
+        fileMenu.getItems().addAll(openDirectoryMenuItem);
+
         Menu importMenu = new Menu("Import");
         openImportMenuItem = new MenuItem("Open");
         importMenu.getItems().addAll(openImportMenuItem);
@@ -85,7 +90,7 @@ public class HeaderPanel extends BorderPane {
         setTop(menuBar);
 
         if (session != null) {
-            Label envLabel = new Label("karate.env");
+            Label envLabel = new Label(ScriptBindings.KARATE_ENV);
             envLabel.setPadding(new Insets(5, 0, 0, 0));
             TextField envTextField = new TextField();
             envTextField.setText(session.getEnv().env);
@@ -111,6 +116,10 @@ public class HeaderPanel extends BorderPane {
     
     public void setFileOpenAction(EventHandler<ActionEvent> handler) {
         openFileMenuItem.setOnAction(handler);
+    }
+
+    public void setDirectoryOpenAction(EventHandler<ActionEvent> handler) {
+        openDirectoryMenuItem.setOnAction(handler);
     }
 
     public void setImportOpenAction(EventHandler<ActionEvent> handler) {

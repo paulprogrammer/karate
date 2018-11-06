@@ -23,6 +23,7 @@
  */
 package com.intuit.karate.web.service;
 
+import com.intuit.karate.CallContext;
 import com.intuit.karate.ScriptEnv;
 import com.intuit.karate.cucumber.CucumberUtils;
 import com.intuit.karate.cucumber.FeatureWrapper;
@@ -45,7 +46,7 @@ public class KarateService {
 
     public KarateSession createSession(String envString, File featureFile, String[] searchPaths) {
         WebSocketLogAppender appender = createAppender();
-        ScriptEnv env = ScriptEnv.init(envString, featureFile, searchPaths, appender.getLogger());
+        ScriptEnv env = ScriptEnv.init(envString, featureFile, searchPaths);
         FeatureWrapper feature = FeatureWrapper.fromFile(featureFile, env);
         return initSessionBackend(feature, appender);
     }
@@ -62,7 +63,7 @@ public class KarateService {
         UUID uuid = UUID.randomUUID();
         String sessionId = uuid.toString();
         WebSocketLogAppender appender = new WebSocketLogAppender(sessionId);
-        ScriptEnv env = ScriptEnv.init(envString, new File("."), new String[]{"src/test/java"}, appender.getLogger());
+        ScriptEnv env = ScriptEnv.init(envString, new File("."), new String[]{"src/test/java"});
         FeatureWrapper feature = FeatureWrapper.fromString(featureText, env, null);
         return initSessionBackend(feature, appender);
     }    
@@ -74,7 +75,8 @@ public class KarateService {
     }
     
     private KarateSession initSessionBackend(FeatureWrapper feature, WebSocketLogAppender appender) {
-        KarateBackend backend = CucumberUtils.getBackendWithGlue(feature.getEnv(), null, null, false);        
+        CallContext callContext = new CallContext(null, true);
+        KarateBackend backend = CucumberUtils.getBackendWithGlue(feature, callContext);        
         KarateSession session = new KarateSession(appender.getSessionId(), feature, backend, appender);
         sessions.put(session.getId(), session);
         return session;        

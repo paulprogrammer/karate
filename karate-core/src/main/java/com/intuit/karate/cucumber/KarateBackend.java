@@ -23,6 +23,8 @@
  */
 package com.intuit.karate.cucumber;
 
+import com.intuit.karate.CallContext;
+import com.intuit.karate.Logger;
 import com.intuit.karate.ScriptContext;
 import com.intuit.karate.ScriptEnv;
 import com.intuit.karate.ScriptValueMap;
@@ -42,49 +44,77 @@ import java.util.Map;
  *
  * @author pthomas3
  */
-public class KarateBackend implements Backend {    
-    
+public class KarateBackend implements Backend {
+
     private final JavaBackend backend;
     private final KarateObjectFactory objectFactory;
-    private Glue glue;
-    
+    private final CallContext callContext;
+    private final String featurePath;
+    private Glue glue;        
+
+    public String getFeaturePath() {
+        return featurePath;
+    }    
+
+    public void setTags(List<String> tags) {
+        callContext.setTags(tags);
+    }
+
+    public void setTagValues(Map<String, List<String>> tagValues) {
+        callContext.setTagValues(tagValues);
+    }
+
+    public void setScenarioInfo(ScenarioInfo scenarioInfo) {
+        callContext.setScenarioInfo(scenarioInfo);
+    }
+
+    public void setScenarioError(Throwable error) {
+        objectFactory.getStepDefs().getContext().setScenarioError(error);
+    }
+
+    public boolean isCalled() {
+        return callContext.isCalled();
+    }
+
+    public CallContext getCallContext() {
+        return callContext;
+    }
+
     public ScriptEnv getEnv() {
         return objectFactory.getEnv();
     }
-    
+
     public ScriptValueMap getVars() {
-        StepDefs stepDefs = getStepDefs();
-        if (stepDefs == null) { // first step
-            return null;
-        }
-        return stepDefs.getContext().getVars();
+        return getStepDefs().getContext().getVars();
     }
-    
-    public void beforeStep(String feature, Step step) {
-        getEnv().debug.beforeStep(feature, step.getLine(), step, getVars());
-    }
-    
-    public void afterStep(String feature, StepResult result) {
-        getEnv().debug.afterStep(feature, result.getStep().getLine(), result, getVars());
-    }    
-    
-    public KarateBackend(ScriptEnv env, ScriptContext parentContext, Map<String, Object> callArg, boolean reuseParentConfig) {
-        ClassFinder classFinder = new KarateClassFinder(env.fileClassLoader);
-        objectFactory = new KarateObjectFactory(env, parentContext, callArg, reuseParentConfig);
+
+    public KarateBackend(FeatureWrapper feature, CallContext callContext) {
+        this.callContext = callContext;
+        this.featurePath = feature.getPath();
+        ClassFinder classFinder = new KarateClassFinder(feature.getEnv().fileClassLoader);
+        objectFactory = new KarateObjectFactory(feature.getEnv(), callContext);
         backend = new JavaBackend(objectFactory, classFinder);
     }
 
     public KarateObjectFactory getObjectFactory() {
         return objectFactory;
-    }   
-    
+    }
+
     public StepDefs getStepDefs() {
         return objectFactory.getStepDefs();
     }
 
     public Glue getGlue() {
         return glue;
-    }        
+    }
+
+    public String getCallingFeature() {
+        if (callContext.parentContext != null) {
+            return callContext.parentContext.getEnv().featureName;
+        } else {
+            return null;
+        }
+    }
 
     @Override
     public void loadGlue(Glue glue, List<String> NOT_USED) {
@@ -92,7 +122,7 @@ public class KarateBackend implements Backend {
         Class glueCodeClass = StepDefs.class;
         for (Method method : glueCodeClass.getMethods()) {
             backend.loadGlue(glue, method, glueCodeClass);
-        }         
+        }
     }
 
     @Override
@@ -114,5 +144,5 @@ public class KarateBackend implements Backend {
     public String getSnippet(Step step, FunctionNameGenerator functionNameGenerator) {
         return backend.getSnippet(step, functionNameGenerator);
     }
-    
+
 }

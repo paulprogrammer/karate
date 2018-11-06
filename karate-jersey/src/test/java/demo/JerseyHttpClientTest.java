@@ -15,7 +15,7 @@ import org.springframework.context.ConfigurableApplicationContext;
  *
  * @author pthomas3
  */
-@CucumberOptions(tags = {"~@ignore"})
+@CucumberOptions(tags = {"~@ignore", "~@apache"})
 public class JerseyHttpClientTest {
     
     @Test
@@ -25,10 +25,11 @@ public class JerseyHttpClientTest {
         FileUtils.copyDirectory(srcDir, destDir, f -> true, false);
         ConfigurableApplicationContext context = Application.run(new String[]{"--server.port=0"});
         ServerStartedInitializingBean ss = context.getBean(ServerStartedInitializingBean.class);
+        System.setProperty("karate.env", "jersey");
         System.setProperty("demo.server.port", ss.getLocalPort() + "");
+        System.setProperty("demo.server.https", "false");
         KarateStats stats = CucumberRunner.parallel(getClass(), 5);
-        assertTrue("there are scenario failures", stats.getFailCount() == 0);        
-        context.stop();
+        assertTrue("there are scenario failures", stats.getFailCount() == 0);
     }
     
 }

@@ -1,7 +1,7 @@
 # Karate Mock Servlet
 
 ## Test any Java Servlet without a Container
-That's right, you can test Spring MVC or Spring Boot controllers and even Jersey JAX-RS resource end-points without having to start Tomcat, Jetty, Grizzly or the like.
+That's right, you can test Spring MVC or Spring Boot controllers and even Jersey JAX-RS resource end-points without having to start Tomcat, JBoss, WebSphere, Glassfish or the like.
 
 And you can re-use your traditional HTTP integration tests without changes - just switch your environment, and Karate can run tests and bypass HTTP on the wire.
 
@@ -24,7 +24,7 @@ Let's take a closer look at the following [`configure`](https://github.com/intui
 
 ## Mocking Your Servlet
 You only need to over-ride two methods: 
-* `Servlet getServlet(HttpRequest request)`
+* `Servlet getServlet(HttpRequestBuilder request)`
 * `ServletContext getServletContext()`
 
 Once you refer to the following examples, you should be able to get up and running for your project.

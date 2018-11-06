@@ -1,18 +1,31 @@
 package com.intuit.karate.junit4;
 
-import com.intuit.karate.cucumber.CucumberRunner;
-import cucumber.runtime.Runtime;
+import com.intuit.karate.CallContext;
+import com.intuit.karate.FileUtils;
+import com.intuit.karate.cucumber.DummyFormatter;
+import com.intuit.karate.cucumber.DummyReporter;
+import com.intuit.karate.cucumber.KarateFeature;
+import com.intuit.karate.cucumber.KarateHtmlReporter;
+import com.intuit.karate.cucumber.KarateRuntime;
+import com.intuit.karate.cucumber.KarateRuntimeOptions;
 import cucumber.runtime.RuntimeOptions;
 import cucumber.runtime.junit.FeatureRunner;
 import cucumber.runtime.junit.JUnitOptions;
 import cucumber.runtime.junit.JUnitReporter;
-import cucumber.runtime.model.CucumberFeature;
+import gherkin.formatter.model.Match;
+import gherkin.formatter.model.Result;
+import gherkin.formatter.model.Scenario;
+import gherkin.formatter.model.Step;
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
+import org.junit.Test;
 import org.junit.runner.Description;
 import org.junit.runner.notification.RunNotifier;
 import org.junit.runners.ParentRunner;
+import org.junit.runners.model.FrameworkMethod;
 import org.junit.runners.model.InitializationError;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -22,50 +35,104 @@ import org.slf4j.LoggerFactory;
  * 
  * @author pthomas3
  */
-public class Karate extends ParentRunner<KarateFeatureRunner> {
-
+public class Karate extends ParentRunner<FeatureRunner> {
+    
     private static final Logger logger = LoggerFactory.getLogger(Karate.class);
     
+    private final List<FeatureRunner> children;
+    
     private final JUnitReporter reporter;
-    private final List<KarateFeatureRunner> children;
+    private final KarateHtmlReporter htmlReporter;    
+    private final Map<Integer, KarateFeatureRunner> featureMap;
 
     public Karate(Class clazz) throws InitializationError, IOException {
         super(clazz);
-        CucumberRunner cr = new CucumberRunner(clazz);
-        RuntimeOptions ro = cr.getRuntimeOptions();        
-        List<CucumberFeature> cucumberFeatures = cr.getFeatures();
-        ClassLoader cl = cr.getClassLoader();
+        List<FrameworkMethod> testMethods = getTestClass().getAnnotatedMethods(Test.class);
+        if (!testMethods.isEmpty()) {
+            logger.warn("WARNING: there are methods annotated with '@Test', they will NOT be run when using '@RunWith(Karate.class)'");
+        }
+        KarateRuntimeOptions kro = new KarateRuntimeOptions(clazz);
+        RuntimeOptions ro = kro.getRuntimeOptions();
         JUnitOptions junitOptions = new JUnitOptions(ro.getJunitOptions());
-        reporter = new JUnitReporter(ro.reporter(cl), ro.formatter(cl), ro.isStrict(), junitOptions);
-        children = new ArrayList<>(cucumberFeatures.size());        
-        for (CucumberFeature feature : cucumberFeatures) {
-            Runtime runtime = cr.getRuntime(feature);
-            FeatureRunner runner = new FeatureRunner(feature, runtime, reporter);
-            children.add(new KarateFeatureRunner(runner, runtime));            
-        }        
+        htmlReporter = new KarateHtmlReporter(new DummyReporter(), new DummyFormatter());
+        reporter = new JUnitReporter(htmlReporter, htmlReporter, ro.isStrict(), junitOptions) {
+            final List<Step> steps = new ArrayList();
+            final List<Match> matches = new ArrayList();
+            @Override
+            public void startOfScenarioLifeCycle(Scenario scenario) {
+                steps.clear();
+                matches.clear();
+                super.startOfScenarioLifeCycle(scenario);
+            }                       
+            @Override
+            public void step(Step step) {
+                steps.add(step);                
+            }
+            @Override
+            public void match(Match match) {
+                matches.add(match);
+            }            
+            @Override
+            public void result(Result result) {
+                Step step = steps.remove(0);
+                Match match = matches.remove(0);
+                CallContext callContext = new CallContext(null, false);
+                // all the above complexity was just to be able to do this
+                htmlReporter.karateStep(step, match, result, callContext, null);
+                // this may not work for things other than the cucumber 'native' json formatter
+                super.step(step);
+                super.match(match);
+                super.result(result);
+            }
+            @Override
+            public void eof() {
+                try {
+                    super.eof();
+                } catch (Exception e) {
+                    logger.warn("WARNING: cucumber native plugin / formatter failed: " + e.getMessage());
+                }
+            }
+        };  
+        List<KarateFeature> list = KarateFeature.loadFeatures(kro);
+        children = new ArrayList(list.size());
+        featureMap = new HashMap(list.size());
+        logger.info("Karate version: {}", FileUtils.getKarateVersion());
+        for (KarateFeature kf : list) {
+            KarateRuntime kr = kf.getRuntime(htmlReporter);
+            FeatureRunner runner = new FeatureRunner(kf.getFeature(), kr, reporter);
+            children.add(runner);
+            featureMap.put(runner.hashCode(), new KarateFeatureRunner(kf, kr));
+        }
     }
     
     @Override
-    public List<KarateFeatureRunner> getChildren() {
+    public List<FeatureRunner> getChildren() {
         return children;
+    }        
+    
+    @Override
+    protected Description describeChild(FeatureRunner child) {
+        return child.getDescription();
     }
 
     @Override
-    protected Description describeChild(KarateFeatureRunner child) {
-        return child.runner.getDescription();
-    }
-
-    @Override
-    protected void runChild(KarateFeatureRunner child, RunNotifier notifier) {
-        child.runner.run(notifier);
-        child.runtime.printSummary();
+    protected void runChild(FeatureRunner child, RunNotifier notifier) {
+        KarateFeatureRunner kfr = featureMap.get(child.hashCode());
+        KarateRuntime karateRuntime = kfr.runtime;
+        htmlReporter.startKarateFeature(kfr.feature.getFeature());
+        child.run(notifier);
+        karateRuntime.afterFeature();
+        karateRuntime.printSummary();
+        htmlReporter.endKarateFeature();
     }
 
     @Override
     public void run(RunNotifier notifier) {
         super.run(notifier);
-        reporter.done();
-        reporter.close();
+        if (reporter != null) { // can happen for zero features found
+            reporter.done();
+            reporter.close();
+        }
     }   
 
 }

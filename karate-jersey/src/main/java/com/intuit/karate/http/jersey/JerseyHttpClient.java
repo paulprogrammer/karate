@@ -28,11 +28,14 @@ import com.intuit.karate.ScriptValue;
 import static com.intuit.karate.http.Cookie.*;
 import com.intuit.karate.http.HttpClient;
 import com.intuit.karate.http.HttpConfig;
+import com.intuit.karate.http.HttpRequest;
 import com.intuit.karate.http.HttpResponse;
 import com.intuit.karate.http.HttpUtils;
 import com.intuit.karate.http.MultiPartItem;
 import com.intuit.karate.http.MultiValuedMap;
 import java.io.InputStream;
+import java.nio.charset.Charset;
+import java.security.KeyStore;
 import java.util.List;
 import java.util.Map.Entry;
 import javax.net.ssl.HttpsURLConnection;
@@ -47,6 +50,7 @@ import javax.ws.rs.core.MediaType;
 import javax.ws.rs.core.MultivaluedHashMap;
 import javax.ws.rs.core.NewCookie;
 import javax.ws.rs.core.Response;
+import org.glassfish.jersey.SslConfigurator;
 import org.glassfish.jersey.client.ClientConfig;
 import org.glassfish.jersey.client.ClientProperties;
 import org.glassfish.jersey.client.HttpUrlConnectorProvider;
@@ -65,21 +69,34 @@ public class JerseyHttpClient extends HttpClient<Entity> {
     private Client client;
     private WebTarget target;
     private Builder builder;
+    private Charset charset;
 
     @Override
     public void configure(HttpConfig config, ScriptContext context) {
         ClientConfig cc = new ClientConfig();
         // support request body for DELETE (non-standard)
-        cc.property(ClientProperties.SUPPRESS_HTTP_COMPLIANCE_VALIDATION, true);        
+        cc.property(ClientProperties.SUPPRESS_HTTP_COMPLIANCE_VALIDATION, true);
+        charset = config.getCharset();
+        if (!config.isFollowRedirects()) {
+            cc.property(ClientProperties.FOLLOW_REDIRECTS, false);
+        }
         ClientBuilder clientBuilder = ClientBuilder.newBuilder()
                 .withConfig(cc)
-                .register(new LoggingInterceptor(context.logger)) // must be first
+                .register(new LoggingInterceptor(context)) // must be first
                 .register(MultiPartFeature.class);
         if (config.isSslEnabled()) {
-            String sslAlgorithm = config.getSslAlgorithm();
-            SSLContext ssl = HttpUtils.getSslContext(sslAlgorithm);
-            HttpsURLConnection.setDefaultSSLSocketFactory(ssl.getSocketFactory());
-            clientBuilder.sslContext(ssl);
+            String algorithm = config.getSslAlgorithm(); // could be null
+            KeyStore trustStore = HttpUtils.getKeyStore(context,
+                    config.getSslTrustStore(), config.getSslTrustStorePassword(), config.getSslTrustStoreType());
+            KeyStore keyStore = HttpUtils.getKeyStore(context,
+                    config.getSslKeyStore(), config.getSslKeyStorePassword(), config.getSslKeyStoreType());
+            SSLContext sslContext = SslConfigurator.newInstance()
+                    .securityProtocol(algorithm) // will default to TLS if null
+                    .trustStore(trustStore)
+                    .keyStore(keyStore)
+                    .createSSLContext();
+            HttpsURLConnection.setDefaultSSLSocketFactory(sslContext.getSocketFactory());
+            clientBuilder.sslContext(sslContext);
             clientBuilder.hostnameVerifier((host, session) -> true);
         }
         client = clientBuilder.build();
@@ -131,13 +148,22 @@ public class JerseyHttpClient extends HttpClient<Entity> {
         builder.cookie(cookie);
     }
 
+    private MediaType getMediaType(String mediaType) {
+        Charset cs = HttpUtils.parseContentTypeCharset(mediaType);
+        if (cs == null) {
+            cs = charset;
+        }
+        MediaType mt = MediaType.valueOf(mediaType);
+        return cs == null ? mt : mt.withCharset(cs.name());
+    }
+
     @Override
     public Entity getEntity(MultiValuedMap fields, String mediaType) {
         MultivaluedHashMap<String, Object> map = new MultivaluedHashMap<>();
         for (Entry<String, List> entry : fields.entrySet()) {
             map.put(entry.getKey(), entry.getValue());
         }
-        return Entity.entity(map, mediaType);
+        return Entity.entity(map, getMediaType(mediaType));
     }
 
     @Override
@@ -150,11 +176,20 @@ public class JerseyHttpClient extends HttpClient<Entity> {
             String name = item.getName();
             String filename = item.getFilename();
             ScriptValue sv = item.getValue();
-            String ct = item.getContentType();                    
+            String ct = item.getContentType();
             if (ct == null) {
                 ct = HttpUtils.getContentType(sv);
             }
             MediaType itemType = MediaType.valueOf(ct);
+            if (HttpUtils.isPrintable(ct)) {
+                Charset cs = HttpUtils.parseContentTypeCharset(mediaType);
+                if (cs == null) {
+                    cs = charset;
+                }
+                if (cs != null) {
+                    itemType = itemType.withCharset(cs.name());
+                }
+            }
             if (name == null) { // most likely multipart/mixed
                 BodyPart bp = new BodyPart().entity(sv.getAsString()).type(itemType);
                 multiPart.bodyPart(bp);
@@ -170,16 +205,16 @@ public class JerseyHttpClient extends HttpClient<Entity> {
 
     @Override
     public Entity getEntity(String value, String mediaType) {
-        return Entity.entity(value, mediaType);
+        return Entity.entity(value, getMediaType(mediaType));
     }
-    
-    @Override
-    public Entity getEntity(InputStream value, String mediaType) {
-        return Entity.entity(value, mediaType);
-    }    
 
     @Override
-    public HttpResponse makeHttpRequest(Entity entity, long startTime) {
+    public Entity getEntity(InputStream value, String mediaType) {
+        return Entity.entity(value, getMediaType(mediaType));
+    }
+
+    @Override
+    public HttpResponse makeHttpRequest(Entity entity, ScriptContext context) {
         String method = request.getMethod();
         if ("PATCH".equals(method)) { // http://danofhisword.com/dev/2015/09/04/Jersey-Client-Http-Patch.html
             builder.property(HttpUrlConnectorProvider.SET_METHOD_WORKAROUND, true);
@@ -190,9 +225,9 @@ public class JerseyHttpClient extends HttpClient<Entity> {
         } else {
             resp = builder.method(method);
         }
-        byte[] bytes = resp.readEntity(byte[].class);
-        long responseTime = getResponseTime(startTime);
-        HttpResponse response = new HttpResponse(responseTime);
+        HttpRequest actualRequest = context.getPrevRequest();
+        HttpResponse response = new HttpResponse(actualRequest.getStartTime(), actualRequest.getEndTime());
+        byte[] bytes = resp.readEntity(byte[].class);        
         response.setUri(getRequestUri());
         response.setBody(bytes);
         response.setStatus(resp.getStatus());
@@ -209,7 +244,7 @@ public class JerseyHttpClient extends HttpClient<Entity> {
             response.addCookie(cookie);
         }
         for (Entry<String, List<Object>> entry : resp.getHeaders().entrySet()) {
-            response.addHeader(entry.getKey(), entry.getValue());
+            response.putHeader(entry.getKey(), entry.getValue());
         }
         return response;
     }

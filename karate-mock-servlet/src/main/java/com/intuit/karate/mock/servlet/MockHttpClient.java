@@ -34,6 +34,7 @@ import com.intuit.karate.http.HttpBody;
 import com.intuit.karate.http.HttpClient;
 import com.intuit.karate.http.HttpConfig;
 import com.intuit.karate.http.HttpRequest;
+import com.intuit.karate.http.HttpRequestBuilder;
 import com.intuit.karate.http.HttpResponse;
 import com.intuit.karate.http.HttpUtils;
 import com.intuit.karate.http.MultiPartItem;
@@ -68,7 +69,7 @@ public abstract class MockHttpClient extends HttpClient<HttpBody> {
     private URI uri;
     private MockHttpServletRequestBuilder requestBuilder;
 
-    protected abstract Servlet getServlet(HttpRequest request);
+    protected abstract Servlet getServlet(HttpRequestBuilder request);
 
     protected abstract ServletContext getServletContext();
 
@@ -162,7 +163,7 @@ public abstract class MockHttpClient extends HttpClient<HttpBody> {
     }
 
     @Override
-    protected HttpResponse makeHttpRequest(HttpBody entity, long startTime) {
+    protected HttpResponse makeHttpRequest(HttpBody entity, ScriptContext context) {
         logger.info("making mock http client request: {} - {}", request.getMethod(), getRequestUri());
         MockHttpServletRequest req = requestBuilder.buildRequest(getServletContext());
         byte[] bytes;
@@ -187,15 +188,15 @@ public abstract class MockHttpClient extends HttpClient<HttpBody> {
         }
         MockHttpServletResponse res = new MockHttpServletResponse();
         logRequest(req, bytes);
+        long startTime = System.currentTimeMillis();
         try {
             getServlet(request).service(req, res);
         } catch (Exception e) {
             throw new RuntimeException(e);
         }
-        long responseTime = getResponseTime(startTime);
+        HttpResponse response = new HttpResponse(startTime, System.currentTimeMillis());
         bytes = res.getContentAsByteArray();
-        logResponse(res, bytes);
-        HttpResponse response = new HttpResponse(responseTime);
+        logResponse(res, bytes);        
         response.setUri(getRequestUri());
         response.setBody(bytes);
         response.setStatus(res.getStatus());
@@ -209,7 +210,7 @@ public abstract class MockHttpClient extends HttpClient<HttpBody> {
             response.addCookie(cookie);
         }
         for (String headerName : res.getHeaderNames()) {
-            response.addHeader(headerName, res.getHeaders(headerName));
+            response.putHeader(headerName, res.getHeaders(headerName));
         }
         return response;
     }

@@ -24,15 +24,15 @@
 package com.intuit.karate.http.apache;
 
 import com.intuit.karate.FileUtils;
+import com.intuit.karate.ScriptContext;
+import com.intuit.karate.http.HttpRequest;
 import java.io.IOException;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.apache.http.HttpEntity;
 import org.apache.http.HttpEntityEnclosingRequest;
 import org.apache.http.HttpException;
-import org.apache.http.HttpRequest;
 import org.apache.http.HttpRequestInterceptor;
 import org.apache.http.protocol.HttpContext;
-import org.slf4j.Logger;
 
 /**
  *
@@ -40,36 +40,52 @@ import org.slf4j.Logger;
  */
 public class RequestLoggingInterceptor implements HttpRequestInterceptor {
 
-    private final Logger logger;
+    private final ScriptContext context;
+    private final AtomicInteger counter = new AtomicInteger();
 
-    private final AtomicInteger counter;
-    
-    public RequestLoggingInterceptor(AtomicInteger counter, Logger logger) {
-        this.counter = counter;
-        this.logger = logger;
-    }      
+    private long startTime;
+
+    public RequestLoggingInterceptor(ScriptContext context) {
+        this.context = context;
+    }
+
+    public AtomicInteger getCounter() {
+        return counter;
+    }
+
+    public long getStartTime() {
+        return startTime;
+    }
 
     @Override
-    public void process(HttpRequest request, HttpContext context) throws HttpException, IOException {
-        if (!logger.isDebugEnabled()) {
-            return;
-        }        
+    public void process(org.apache.http.HttpRequest request, HttpContext httpContext) throws HttpException, IOException {
+        HttpRequest actual = new HttpRequest();
         int id = counter.incrementAndGet();
-        String uri = (String) context.getAttribute(ApacheHttpClient.URI_CONTEXT_KEY);
+        String uri = (String) httpContext.getAttribute(ApacheHttpClient.URI_CONTEXT_KEY);
+        String method = request.getRequestLine().getMethod();
+        actual.setUri(uri);
+        actual.setMethod(method);
         StringBuilder sb = new StringBuilder();
-        sb.append('\n').append(id).append(" > ").append(request.getRequestLine().getMethod()).append(' ').append(uri).append('\n');
-        LoggingUtils.logHeaders(sb, id, '>', request);
+        sb.append("request:\n").append(id).append(" > ").append(method).append(' ').append(uri).append('\n');
+        LoggingUtils.logHeaders(sb, id, '>', request, actual);
         if (request instanceof HttpEntityEnclosingRequest) {
             HttpEntityEnclosingRequest entityRequest = (HttpEntityEnclosingRequest) request;
             HttpEntity entity = entityRequest.getEntity();
             if (LoggingUtils.isPrintable(entity)) {
-                LoggingEntityWrapper wrapper = new LoggingEntityWrapper(entity);
+                LoggingEntityWrapper wrapper = new LoggingEntityWrapper(entity); // todo optimize, preserve if stream
                 String buffer = FileUtils.toString(wrapper.getContent());
+                if (context.getConfig().isLogPrettyRequest()) {
+                    buffer = FileUtils.toPrettyString(buffer);
+                }
                 sb.append(buffer).append('\n');
+                actual.setBody(wrapper.getBytes());
                 entityRequest.setEntity(wrapper);
             }
         }
-        logger.debug(sb.toString());
+        context.setPrevRequest(actual);
+        context.logger.debug(sb.toString());
+        startTime = System.currentTimeMillis();
+        actual.setStartTime(startTime);
     }
 
 }

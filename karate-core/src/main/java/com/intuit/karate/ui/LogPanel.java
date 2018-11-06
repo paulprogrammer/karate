@@ -23,31 +23,33 @@
  */
 package com.intuit.karate.ui;
 
-import javafx.geometry.Insets;
+import com.intuit.karate.Logger;
 import javafx.scene.control.Button;
 import javafx.scene.control.TextArea;
 import javafx.scene.layout.BorderPane;
 import javafx.scene.layout.VBox;
+
+import static com.intuit.karate.ui.App.PADDING_INSET;
 
 /**
  *
  * @author pthomas3
  */
 public class LogPanel extends BorderPane {
-    
+
     private final TextArea textArea;
-    private final TextAreaLogAppender appender;
-    
-    public LogPanel() {
-        setPadding(new Insets(2.0));
+
+    public LogPanel(Logger logger) {
+        setPadding(PADDING_INSET);
         VBox content = new VBox(2.0);
         setCenter(content);
         textArea = new TextArea();
+        TextAreaLogAppender appender = new TextAreaLogAppender(logger, textArea);
         textArea.setFont(App.getDefaultFont());
         Button clearButton = new Button("Clear Log");
         clearButton.setOnAction(e -> textArea.clear());        
-        appender = new TextAreaLogAppender(textArea);
         content.getChildren().addAll(textArea, clearButton);
+        DragResizer.makeResizable(textArea, false, false, true, false);
     }
     
     public void append(String s) {

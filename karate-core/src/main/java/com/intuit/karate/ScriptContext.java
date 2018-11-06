@@ -23,13 +23,20 @@
  */
 package com.intuit.karate;
 
+import com.intuit.karate.cucumber.ScenarioInfo;
+import com.intuit.karate.cucumber.StepInterceptor;
 import com.intuit.karate.exception.KarateFileNotFoundException;
 import com.intuit.karate.http.Cookie;
 import com.intuit.karate.http.HttpClient;
 import com.intuit.karate.http.HttpConfig;
+import com.intuit.karate.http.HttpRequest;
 import com.intuit.karate.validator.Validator;
+import java.nio.charset.Charset;
+import java.util.List;
 import java.util.Map;
-import org.slf4j.Logger;
+import java.util.function.Consumer;
+
+import jdk.nashorn.api.scripting.ScriptObjectMirror;
 
 /**
  *
@@ -39,33 +46,53 @@ public class ScriptContext {
 
     public final Logger logger;
 
-    private static final String KARATE_DOT_CONTEXT = "karate.context";
-    public static final String KARATE_NAME = "karate";
-    private static final String VAR_READ = "read";
+    protected final ScriptBindings bindings;
 
+    protected final int callDepth;
+    protected final List<String> tags;
+    protected final Map<String, List<String>> tagValues;
     protected final ScriptValueMap vars;
     protected final Map<String, Validator> validators;
-    protected final ScriptEnv env;    
-    private final ScriptValue readFunction;
+    protected final ScriptEnv env;
+    protected final Consumer<Runnable> asyncSystem;
+    protected final Runnable asyncNext;
+    protected final StepInterceptor stepInterceptor;
+
+    protected final ScenarioInfo scenarioInfo;
 
     // these can get re-built or swapped, so cannot be final
     protected HttpClient client;
     protected HttpConfig config;
 
+    // the actual http request last sent on the wire
+    protected HttpRequest prevRequest;
+
+    public void setScenarioError(Throwable error) {
+        scenarioInfo.setErrorMessage(error.getMessage());
+    }
+
+    public void setPrevRequest(HttpRequest prevRequest) {
+        this.prevRequest = prevRequest;
+    }
+
+    public HttpRequest getPrevRequest() {
+        return prevRequest;
+    }
+
+    public int getCallDepth() {
+        return callDepth;
+    }
+
     public ScriptEnv getEnv() {
         return env;
-    }        
+    }
 
     public ScriptValueMap getVars() {
         return vars;
     }
 
-    public ScriptValue getConfigHeaders() {
-        return config.getHeaders();
-    }
-
-    public ScriptValue getConfigCookies() {
-        return config.getCookies();
+    public HttpConfig getConfig() {
+        return config;
     }
 
     public void updateConfigCookies(Map<String, Cookie> cookies) {
@@ -81,67 +108,93 @@ public class ScriptContext {
         }
     }
 
-    public boolean isLogPrettyRequest() {
-        return config.isLogPrettyRequest();
-    }
-
-    public boolean isLogPrettyResponse() {
-        return config.isLogPrettyResponse();
-    }
-    
     public boolean isPrintEnabled() {
         return config.isPrintEnabled();
-    }    
+    }
 
-    public ScriptContext(ScriptEnv env, ScriptContext parent, Map<String, Object> arg) {
-        this.env = env.refresh(null);
+    public ScriptContext(ScriptEnv env, CallContext call) {
+        env = env.refresh(null);
+        this.env = env; // make sure references below to env.env use the updated one
         logger = env.logger;
-        if (parent != null) {
-            vars = Script.clone(parent.vars);
-            validators = parent.validators;
-            config = new HttpConfig(parent.config);
+        callDepth = call.callDepth;
+        asyncSystem = call.asyncSystem;
+        stepInterceptor = call.stepInterceptor;
+        asyncNext = call.asyncNext;
+        tags = call.getTags();
+        tagValues = call.getTagValues();
+        scenarioInfo = call.getScenarioInfo();
+        if (call.reuseParentContext) {
+            vars = call.parentContext.vars; // shared context !
+            validators = call.parentContext.validators;
+            config = call.parentContext.config;
+        } else if (call.parentContext != null) {
+            vars = call.parentContext.vars.copy();
+            validators = call.parentContext.validators;
+            config = new HttpConfig(call.parentContext.config);
         } else {
             vars = new ScriptValueMap();
-            validators = Script.getDefaultValidators();
+            validators = Validator.getDefaults();
             config = new HttpConfig();
+            config.setClientClass(call.httpClientClass);
         }
         client = HttpClient.construct(config, this);
-        readFunction = Script.eval(getFileReaderFunction(), this);
-        if (parent == null) {
+        bindings = new ScriptBindings(this);
+        if (call.parentContext == null && call.evalKarateConfig) {
+            // base config is only looked for in the classpath
             try {
-                Script.callAndUpdateConfigAndAlsoVarsIfMapReturned(false, "read('classpath:karate-config.js')", null, this);
+                Script.callAndUpdateConfigAndAlsoVarsIfMapReturned(false, ScriptBindings.READ_KARATE_CONFIG_BASE, null, this);
             } catch (Exception e) {
-                Throwable cause = e.getCause();
-                if (cause instanceof KarateFileNotFoundException) {
-                    logger.warn("karate-config.js not found on the classpath, skipping bootstrap configuration");
+                if (e instanceof KarateFileNotFoundException) {
+                    logger.trace("skipping 'classpath:karate-base.js': {}", e.getMessage());
                 } else {
-                    throw new RuntimeException("bootstrap configuration error, evaluation of karate-config.js failed:", cause);
+                    throw new RuntimeException("evaluation of 'classpath:karate-base.js' failed", e);
+                }
+            }
+            String configDir = System.getProperty(ScriptBindings.KARATE_CONFIG_DIR);
+            String configScript = ScriptBindings.readKarateConfigForEnv(true, configDir, null);
+            try {
+                Script.callAndUpdateConfigAndAlsoVarsIfMapReturned(false, configScript, null, this);
+            } catch (Exception e) {
+                if (e instanceof KarateFileNotFoundException) {
+                    logger.warn("skipping bootstrap configuration: {}", e.getMessage());
+                } else {
+                    throw new RuntimeException("evaluation of '" + ScriptBindings.KARATE_CONFIG_JS + "' failed", e);
+                }
+            }
+            if (env.env != null) {
+                configScript = ScriptBindings.readKarateConfigForEnv(false, configDir, env.env);
+                try {
+                    Script.callAndUpdateConfigAndAlsoVarsIfMapReturned(false, configScript, null, this);
+                } catch (Exception e) {
+                    if (e instanceof KarateFileNotFoundException) {
+                        logger.debug("skipping bootstrap configuration for env: {} - {}", env.env, e.getMessage());
+                    } else {
+                        throw new RuntimeException("evaluation of 'karate-config-" + env.env + ".js' failed", e);
+                    }
                 }
             }
         }
-        if (arg != null) {
-            for (Map.Entry<String, Object> entry : arg.entrySet()) {
+        if (call.callArg != null) { // if call.reuseParentContext is true, arg will clobber parent context
+            for (Map.Entry<String, Object> entry : call.callArg.entrySet()) {
                 vars.put(entry.getKey(), entry.getValue());
             }
+            vars.put(Script.VAR_ARG, call.callArg);
+            vars.put(Script.VAR_LOOP, call.loopIndex);
+        } else if (call.parentContext != null) {
+            vars.put(Script.VAR_ARG, ScriptValue.NULL);
+            vars.put(Script.VAR_LOOP, -1);
         }
         logger.trace("karate context init - initial properties: {}", vars);
-    }
-
-    private static String getFileReaderFunction() {
-        return "function(path) {\n"
-                + "  var FileUtils = Java.type('" + FileUtils.class.getCanonicalName() + "');\n"
-                + "  return FileUtils.readFile(path, " + KARATE_DOT_CONTEXT + ").value;\n"
-                + "}";
     }
 
     public void configure(HttpConfig config) {
         this.config = config;
         client = HttpClient.construct(config, this);
-    }    
-    
+    }
+
     public void configure(String key, String exp) {
-        configure(key, Script.eval(exp, this));
-    }    
+        configure(key, Script.evalKarateExpression(exp, this));
+    }
 
     public void configure(String key, ScriptValue value) { // TODO use enum
         key = StringUtils.trimToEmpty(key);
@@ -151,6 +204,14 @@ public class ScriptContext {
         }
         if (key.equals("cookies")) {
             config.setCookies(value);
+            return;
+        }
+        if (key.equals("responseHeaders")) {
+            config.setResponseHeaders(value);
+            return;
+        }
+        if (key.equals("cors")) {
+            config.setCorsEnabled(value.isBooleanTrue());
             return;
         }
         if (key.equals("logPrettyResponse")) {
@@ -164,7 +225,15 @@ public class ScriptContext {
         if (key.equals("printEnabled")) {
             config.setPrintEnabled(value.isBooleanTrue());
             return;
-        }        
+        }
+        if (key.equals("afterScenario")) {
+            config.setAfterScenario(value);
+            return;
+        }
+        if (key.equals("afterFeature")) {
+            config.setAfterFeature(value);
+            return;
+        }
         if (key.equals("httpClientClass")) {
             config.setClientClass(value.getAsString());
             // re-construct all the things ! and we exit early
@@ -177,14 +246,54 @@ public class ScriptContext {
             client = HttpClient.construct(config, this);
             return;
         }
+        if (key.equals("charset")) {
+            if (value.isNull()) {
+                config.setCharset(null);
+            } else {
+                config.setCharset(Charset.forName(value.getAsString()));
+            }
+            // here again, re-construct client - and exit early
+            client = HttpClient.construct(config, this);
+            return;
+        }
+        if (key.equals("report")) {
+            if (value.isMapLike()) {
+                Map<String, Object> map = value.getAsMap();
+                config.setLogEnabled((Boolean) map.get("logEnabled"));
+                config.setShowAllSteps((Boolean) map.get("showAllSteps"));
+            } else if (value.isBooleanTrue()) {
+                config.setLogEnabled(true);
+                config.setShowAllSteps(true);
+            } else {
+                config.setLogEnabled(false);
+                config.setShowAllSteps(false);
+            }
+            return;
+        }
         // beyond this point, we don't exit early and we have to re-configure the http client
         if (key.equals("ssl")) {
             if (value.isString()) {
                 config.setSslEnabled(true);
                 config.setSslAlgorithm(value.getAsString());
+            } else if (value.isMapLike()) {
+                config.setSslEnabled(true);
+                Map<String, Object> map = value.getAsMap();
+                config.setSslKeyStore((String) map.get("keyStore"));
+                config.setSslKeyStorePassword((String) map.get("keyStorePassword"));
+                config.setSslKeyStoreType((String) map.get("keyStoreType"));
+                config.setSslTrustStore((String) map.get("trustStore"));
+                config.setSslTrustStorePassword((String) map.get("trustStorePassword"));
+                config.setSslTrustStoreType((String) map.get("trustStoreType"));
+                String trustAll = (String) map.get("trustAll");
+                if (trustAll != null) {
+                    config.setSslTrustAll(Boolean.valueOf(trustAll));
+                }
+                config.setSslAlgorithm((String) map.get("algorithm"));
             } else {
                 config.setSslEnabled(value.isBooleanTrue());
             }
+        } else if (key.equals("followRedirects")) {
+            config.setFollowRedirects(value.isBooleanTrue());
         } else if (key.equals("connectTimeout")) {
             config.setConnectTimeout(Integer.valueOf(value.getAsString()));
         } else if (key.equals("readTimeout")) {
@@ -197,6 +306,7 @@ public class ScriptContext {
                 config.setProxyUri((String) map.get("uri"));
                 config.setProxyUsername((String) map.get("username"));
                 config.setProxyPassword((String) map.get("password"));
+                config.setNonProxyHosts(((List) ((ScriptObjectMirror) map.get("nonProxyHosts")).values()));
             }
         } else if (key.equals("userDefined")) {
             config.setUserDefined(value.getAsMap());
@@ -204,14 +314,6 @@ public class ScriptContext {
             throw new RuntimeException("unexpected 'configure' key: '" + key + "'");
         }
         client.configure(config, this);
-    }
-
-    public Map<String, Object> getVariableBindings() {
-        Map<String, Object> map = Script.simplify(vars);
-        if (readFunction != null) {
-            map.put(VAR_READ, readFunction.getValue());
-        }
-        return map;
     }
 
 }

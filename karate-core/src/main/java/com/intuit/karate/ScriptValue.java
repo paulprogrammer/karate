@@ -29,7 +29,6 @@ import com.jayway.jsonpath.JsonPath;
 import java.io.ByteArrayInputStream;
 import java.io.InputStream;
 import java.util.ArrayList;
-import java.util.Collection;
 import java.util.List;
 import java.util.Map;
 import jdk.nashorn.api.scripting.ScriptObjectMirror;
@@ -55,6 +54,7 @@ public class ScriptValue {
         JS_ARRAY,
         JS_OBJECT,
         JS_FUNCTION,
+        BYTE_ARRAY,
         INPUT_STREAM,
         FEATURE_WRAPPER
     }
@@ -91,12 +91,14 @@ public class ScriptValue {
                 return "js{}";
             case JS_FUNCTION:
                 return "js()";
+            case BYTE_ARRAY:
+                return "byte[]";
             case INPUT_STREAM:
                 return "stream";
             case FEATURE_WRAPPER:
-                return "feat";
+                return "feature";
             default:
-                return "??";
+                return "???";
         }
     }
 
@@ -108,10 +110,18 @@ public class ScriptValue {
         return type == Type.STRING;
     }
     
+    public boolean isStringOrStream() {
+        return isString() || isStream();
+    }    
+
+    public boolean isXml() {
+        return type == Type.XML;
+    }
+
     public boolean isStream() {
         return type == Type.INPUT_STREAM;
     }
-    
+
     public boolean isUnknownType() {
         return type == Type.UNKNOWN;
     }
@@ -120,11 +130,18 @@ public class ScriptValue {
         return type == Type.PRIMITIVE && "true".equals(value.toString());
     }
 
+    public boolean isFunction() {
+        return type == Type.JS_FUNCTION;
+    }
+
     public boolean isListLike() {
         switch (type) {
             case JS_ARRAY:
             case LIST:
                 return true;
+            case JSON:
+                DocumentContext doc = (DocumentContext) value;
+                return doc.json() instanceof List;
             default:
                 return false;
         }
@@ -133,20 +150,23 @@ public class ScriptValue {
     public List getAsList() {
         switch (type) {
             case JS_ARRAY:
-                Collection coll = getValue(ScriptObjectMirror.class).values();
-                return new ArrayList(coll);
+                ScriptObjectMirror som = (ScriptObjectMirror) value;
+                return new ArrayList(som.values());
             case LIST:
                 return getValue(List.class);
+            case JSON:
+                DocumentContext doc = (DocumentContext) value;
+                return doc.json();
             default:
                 throw new RuntimeException("cannot convert to list: " + this);
         }
     }
-    
+
     public boolean isJsonLike() {
         switch (type) {
             case JSON:
             case MAP:
-            case JS_OBJECT:    
+            case JS_OBJECT:
             case JS_ARRAY:
             case LIST:
                 return true;
@@ -155,6 +175,34 @@ public class ScriptValue {
         }
     }
     
+    public ScriptValue copy() {
+        switch (type) {
+            case NULL:
+            case UNKNOWN:
+            case PRIMITIVE:
+            case STRING:
+            case BYTE_ARRAY:
+            case INPUT_STREAM:
+            case FEATURE_WRAPPER:
+            case JS_FUNCTION:                
+                return this;
+            case XML:
+                String xml = XmlUtils.toString(getValue(Node.class));
+                return new ScriptValue(XmlUtils.toXmlDoc(xml));
+            case JSON:
+                String json = getValue(DocumentContext.class).jsonString();
+                return new ScriptValue(JsonPath.parse(json));
+            case MAP:                                               
+            case JS_OBJECT:
+            case JS_ARRAY:
+            case LIST:
+                DocumentContext mapOrListJson = getAsJsonDocument();
+                return new ScriptValue(JsonPath.parse(mapOrListJson).read("$"));            
+            default:
+                return this;
+        }
+    }
+
     public DocumentContext getAsJsonDocument() {
         switch (type) {
             case JSON:
@@ -201,24 +249,28 @@ public class ScriptValue {
                 throw new RuntimeException("cannot convert to map: " + this);
         }
     }
-    
+
+    public ScriptValue invokeFunction(ScriptContext context) {
+        ScriptObjectMirror som = getValue(ScriptObjectMirror.class);
+        return Script.evalFunctionCall(som, null, context);
+    }
+
     public Map<String, Object> evalAsMap(ScriptContext context) {
-        if (type == Type.JS_FUNCTION) {
-            ScriptObjectMirror som = getValue(ScriptObjectMirror.class);
-            ScriptValue sv = Script.evalFunctionCall(som, null, context);
+        if (isFunction()) {
+            ScriptValue sv = invokeFunction(context);
             return sv.isMapLike() ? sv.getAsMap() : null;
         } else {
             return isMapLike() ? getAsMap() : null;
         }
-    }    
-    
+    }
+
     public String getAsPrettyString() {
         switch (type) {
             case NULL:
                 return "";
             case XML:
                 Node node = getValue(Node.class);
-                return XmlUtils.toString(node, true);                
+                return XmlUtils.toString(node, true);
             case JSON:
                 DocumentContext doc = getValue(DocumentContext.class);
                 return JsonUtils.toPrettyJsonString(doc);
@@ -232,10 +284,12 @@ public class ScriptValue {
                 Map map = getAsMap();
                 DocumentContext mapDoc = JsonPath.parse(map);
                 return JsonUtils.toPrettyJsonString(mapDoc);
-            case INPUT_STREAM:
+            case BYTE_ARRAY:
+                return "(..bytes..)";
+            case INPUT_STREAM:            
                 return "(..stream..)";
             default:
-                return value.toString();            
+                return value.toString();
         }
     }
 
@@ -264,14 +318,16 @@ public class ScriptValue {
                 DocumentContext mapDoc = JsonPath.parse(map);
                 return mapDoc.jsonString();
             case JS_FUNCTION:
-                return value.toString().replace("\n", " ");                
+                return value.toString().replace("\n", " ");
+            case BYTE_ARRAY:
+                return FileUtils.toString(getValue(byte[].class));
             case INPUT_STREAM:
                 return FileUtils.toString(getValue(InputStream.class));
             default:
                 return value.toString();
         }
     }
-    
+
     public InputStream getAsStream() {
         switch (type) {
             case NULL:
@@ -306,12 +362,12 @@ public class ScriptValue {
         }
         return (T) value;
     }
-    
+
     public ScriptValue(Object value) {
         this(value, null);
-    } 
+    }
 
-    public ScriptValue(Object value, String source) {        
+    public ScriptValue(Object value, String source) {
         this.value = value;
         this.source = source;
         if (value == null) {
@@ -337,6 +393,8 @@ public class ScriptValue {
             }
         } else if (value instanceof String) {
             type = Type.STRING;
+        } else if (value instanceof byte[]) {
+            type = Type.BYTE_ARRAY;
         } else if (value instanceof InputStream) {
             type = Type.INPUT_STREAM;
         } else if (Script.isPrimitive(value.getClass())) {
@@ -347,7 +405,7 @@ public class ScriptValue {
             type = Type.UNKNOWN;
         }
     }
-    
+
     public String toPrettyString(String key) {
         StringBuilder sb = new StringBuilder();
         String description = key + " (" + getTypeAsShortString() + "): ";
@@ -365,7 +423,7 @@ public class ScriptValue {
         }
         sb.append(temp).append('\n');
         return sb.toString();
-    }    
+    }
 
     @Override
     public String toString() {

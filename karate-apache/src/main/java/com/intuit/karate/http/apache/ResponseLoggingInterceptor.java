@@ -24,14 +24,13 @@
 package com.intuit.karate.http.apache;
 
 import com.intuit.karate.FileUtils;
+import com.intuit.karate.ScriptContext;
 import java.io.IOException;
-import java.util.concurrent.atomic.AtomicInteger;
 import org.apache.http.HttpEntity;
 import org.apache.http.HttpException;
 import org.apache.http.HttpResponse;
 import org.apache.http.HttpResponseInterceptor;
 import org.apache.http.protocol.HttpContext;
-import org.slf4j.Logger;
 
 /**
  *
@@ -39,32 +38,35 @@ import org.slf4j.Logger;
  */
 public class ResponseLoggingInterceptor implements HttpResponseInterceptor {
 
-    private final Logger logger;
+    private final ScriptContext context;
+    private final RequestLoggingInterceptor requestInterceptor;
 
-    private final AtomicInteger counter;
-
-    public ResponseLoggingInterceptor(AtomicInteger counter, Logger logger) {
-        this.counter = counter;
-        this.logger = logger;
-    }    
+    public ResponseLoggingInterceptor(RequestLoggingInterceptor requestInterceptor, ScriptContext context) {
+        this.requestInterceptor = requestInterceptor;
+        this.context = context;
+    }
 
     @Override
-    public void process(HttpResponse response, HttpContext context) throws HttpException, IOException {
-        if (!logger.isDebugEnabled()) {
-            return;
-        }        
-        int id = counter.get();
+    public void process(HttpResponse response, HttpContext httpContext) throws HttpException, IOException {
+        long endTime = System.currentTimeMillis();
+        long responseTime = endTime - requestInterceptor.getStartTime();
+        context.getPrevRequest().setEndTime(endTime);
+        int id = requestInterceptor.getCounter().get();
         StringBuilder sb = new StringBuilder();
-        sb.append('\n').append(id).append(" < ").append(response.getStatusLine().getStatusCode()).append('\n');
+        sb.append("response time in milliseconds: ").append(responseTime).append('\n');
+        sb.append(id).append(" < ").append(response.getStatusLine().getStatusCode()).append('\n');
         LoggingUtils.logHeaders(sb, id, '<', response);
         HttpEntity entity = response.getEntity();
         if (LoggingUtils.isPrintable(entity)) {
             LoggingEntityWrapper wrapper = new LoggingEntityWrapper(entity);
             String buffer = FileUtils.toString(wrapper.getContent());
+            if (context.getConfig().isLogPrettyResponse()) {
+                buffer = FileUtils.toPrettyString(buffer);
+            }
             sb.append(buffer).append('\n');
             response.setEntity(wrapper);
         }
-        logger.debug(sb.toString());
+        context.logger.debug(sb.toString());
     }
 
 }

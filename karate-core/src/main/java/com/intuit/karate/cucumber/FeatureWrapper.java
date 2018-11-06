@@ -55,10 +55,18 @@ public class FeatureWrapper {
     public void setEnv(ScriptEnv scriptEnv) {
         this.scriptEnv = scriptEnv;
     }
+    
+    public static FeatureWrapper fromFile(File file) {
+        return fromFile(file, Thread.currentThread().getContextClassLoader(), null);
+    }    
+    
+    public static FeatureWrapper fromFile(File file, KarateReporter reporter) {
+        return fromFile(file, Thread.currentThread().getContextClassLoader(), reporter);
+    }
 
-    public static FeatureWrapper fromFile(File file, ClassLoader classLoader) {
+    public static FeatureWrapper fromFile(File file, ClassLoader classLoader, KarateReporter reporter) {
         String text = FileUtils.toString(file);
-        ScriptEnv env = ScriptEnv.init(file.getParentFile(), file.getName(), classLoader);
+        ScriptEnv env = new ScriptEnv(null, file.getParentFile(), file.getName(), classLoader, reporter);
         return new FeatureWrapper(text, env, file.getPath());
     }
 
@@ -78,6 +86,9 @@ public class FeatureWrapper {
 
     public String joinLines(int startLine, int endLine) {
         StringBuilder sb = new StringBuilder();
+        if (endLine > lines.size() - 1) {
+            endLine = lines.size() - 1;
+        }
         for (int i = startLine; i < endLine; i++) {
             String line = lines.get(i);
             sb.append(line).append("\n");
@@ -93,6 +104,18 @@ public class FeatureWrapper {
     public List<String> getLines() {
         return lines;
     }
+    
+    public String getFirstScenarioName() {
+        if (featureSections == null || featureSections.isEmpty()) {
+            return null;
+        }
+        FeatureSection fs = featureSections.get(0);
+        if (fs.isOutline()) {
+            return fs.getScenarioOutline().getScenarioOutline().getGherkinModel().getName();
+        } else {
+            return fs.getScenario().getScenario().getGherkinModel().getName();
+        }
+     }
 
     public CucumberFeature getFeature() {
         return feature;
@@ -155,7 +178,7 @@ public class FeatureWrapper {
         this.path = path;
         this.text = text;
         this.scriptEnv = scriptEnv;
-        this.feature = CucumberUtils.parse(text);
+        this.feature = CucumberUtils.parse(text, path);
         this.lines = FileUtils.toStringLines(text);
         featureSections = new ArrayList<>();
         List<CucumberTagStatement> elements = feature.getFeatureElements();

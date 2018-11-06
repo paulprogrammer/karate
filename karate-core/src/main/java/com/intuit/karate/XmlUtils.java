@@ -25,13 +25,16 @@ package com.intuit.karate;
 
 import com.jayway.jsonpath.DocumentContext;
 import com.jayway.jsonpath.JsonPath;
+import java.io.IOException;
 import java.io.InputStream;
+import java.io.StringReader;
 import java.io.StringWriter;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import javax.xml.XMLConstants;
 import javax.xml.parsers.DocumentBuilder;
 import javax.xml.parsers.DocumentBuilderFactory;
 import javax.xml.transform.OutputKeys;
@@ -44,11 +47,15 @@ import javax.xml.xpath.XPathConstants;
 import javax.xml.xpath.XPathExpression;
 import javax.xml.xpath.XPathExpressionException;
 import javax.xml.xpath.XPathFactory;
+import org.w3c.dom.Attr;
 import org.w3c.dom.Document;
 import org.w3c.dom.Element;
 import org.w3c.dom.NamedNodeMap;
 import org.w3c.dom.Node;
 import org.w3c.dom.NodeList;
+import org.xml.sax.EntityResolver;
+import org.xml.sax.InputSource;
+import org.xml.sax.SAXException;
 
 /**
  *
@@ -78,6 +85,8 @@ public class XmlUtils {
             if (pretty) {
                 transformer.setOutputProperty(OutputKeys.INDENT, "yes");
                 transformer.setOutputProperty("{http://xml.apache.org/xslt}indent-amount", "2");
+            } else {
+                transformer.setOutputProperty(OutputKeys.INDENT, "no");
             }
             transformer.transform(domSource, result);
             return writer.toString();
@@ -92,18 +101,39 @@ public class XmlUtils {
         for (int i = 0; i < count; ++i) {
             Node child = children.item(i);
             if (child.getNodeType() == Node.TEXT_NODE) {
-                child.setTextContent(child.getTextContent().trim());
+                child.setTextContent(child.getTextContent() == null ? "" : child.getTextContent().trim());
             }
             trimWhiteSpace(child);
         }
+    }
+
+    private static class DtdEntityResolver implements EntityResolver {
+
+        protected boolean dtdPresent;
+
+        @Override
+        public InputSource resolveEntity(String publicId, String systemId) throws SAXException, IOException {
+            dtdPresent = true;
+            return new InputSource(new StringReader(""));
+        }
+
     }
 
     public static Document toXmlDoc(String xml) {
         DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
         try {
             DocumentBuilder builder = factory.newDocumentBuilder();
+            DtdEntityResolver dtdEntityResolver = new DtdEntityResolver();
+            builder.setEntityResolver(dtdEntityResolver);
             InputStream is = FileUtils.toInputStream(xml);
-            return builder.parse(is);
+            Document doc = builder.parse(is);
+            if (dtdEntityResolver.dtdPresent) { // DOCTYPE present
+                // the XML was not parsed, but I think it hangs at the root as a text node
+                // so conversion to string and back has the effect of discarding the DOCTYPE !
+                return toXmlDoc(toString(doc, false));
+            } else {
+                return doc;
+            }
         } catch (Exception e) {
             throw new RuntimeException(e);
         }
@@ -127,12 +157,12 @@ public class XmlUtils {
             throw new RuntimeException(e);
         }
     }
-    
+
     public static String stripNameSpacePrefixes(String path) {
         if (path.indexOf(':') == -1) {
             return path;
         }
-        StringBuilder sb = new StringBuilder();        
+        StringBuilder sb = new StringBuilder();
         for (String s : StringUtils.split(path, '/')) {
             sb.append('/');
             int pos = s.lastIndexOf(':');
@@ -161,21 +191,21 @@ public class XmlUtils {
             return result;
         }
     }
-    
+
     public static Node createNodeByPath(Document doc, String path) {
         int pos = path.lastIndexOf('/');
         if (pos == 0) { // root
             Node root = doc.getDocumentElement();
             if (root == null) {
                 root = createElement(doc, path.substring(1), null, null);
-                doc.appendChild(root);                
+                doc.appendChild(root);
             }
             return root;
         }
         String left = path.substring(0, pos);
-        Node parent = getNodeByPath(doc, left, true);       
+        Node parent = getNodeByPath(doc, left, true);
         String right = path.substring(pos + 1);
-         if (right.startsWith("@")) { // attribute
+        if (right.startsWith("@")) { // attribute
             Element parentElement = (Element) parent;
             right = right.substring(1);
             parentElement.setAttribute(right, "");
@@ -187,7 +217,7 @@ public class XmlUtils {
             }
             Element element = createElement(parent, right, null, null);
             parent.appendChild(element);
-            return element;            
+            return element;
         }
     }
 
@@ -216,9 +246,14 @@ public class XmlUtils {
         if (node == null) {
             return;
         }
-        Node parent = node.getParentNode();
-        if (parent != null) {
-            parent.removeChild(node);
+        if (node.getNodeType() == Node.ATTRIBUTE_NODE) {
+            Element parent = ((Attr) node).getOwnerElement();
+            parent.removeAttribute(node.getNodeName());
+        } else {
+            Node parent = node.getParentNode();
+            if (parent != null) {
+                parent.removeChild(node);
+            }
         }
     }
 
@@ -269,7 +304,7 @@ public class XmlUtils {
     private static Object getElementAsObject(Node node) {
         int childElementCount = getChildElementCount(node);
         if (childElementCount == 0) {
-            return node.getTextContent();
+            return StringUtils.trimToNull(node.getTextContent());
         }
         Map<String, Object> map = new LinkedHashMap<>(childElementCount);
         NodeList nodes = node.getChildNodes();
@@ -280,7 +315,7 @@ public class XmlUtils {
                 continue;
             }
             String childName = child.getNodeName();
-            Object childValue = child.hasChildNodes() ? toObject(child) : null;
+            Object childValue = toObject(child);
             // auto detect repeating elements
             if (map.containsKey(childName)) {
                 Object temp = map.get(childName);
@@ -334,10 +369,10 @@ public class XmlUtils {
     public static List<Element> fromObject(Document doc, String name, Object o) {
         if (o instanceof Map) {
             Map<String, Object> map = (Map) o;
+            Map<String, Object> attribs = (Map) map.get("@");
             Object value = map.get("_");
-            if (value != null) {
+            if (value != null || attribs != null) {
                 List<Element> elements = fromObject(doc, name, value);
-                Map<String, Object> attribs = (Map) map.get("@");
                 addAttributes(elements.get(0), attribs);
                 return elements;
             } else {

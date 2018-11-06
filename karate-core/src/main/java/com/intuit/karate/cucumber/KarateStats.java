@@ -23,8 +23,9 @@
  */
 package com.intuit.karate.cucumber;
 
-import java.util.ArrayList;
-import java.util.List;
+import com.intuit.karate.FileUtils;
+import java.util.LinkedHashMap;
+import java.util.Map;
 
 /**
  *
@@ -32,24 +33,25 @@ import java.util.List;
  */
 public class KarateStats {
     
+    private int featureCount;
     private int testCount;
     private int failCount;
     private int skipCount;
     private double timeTaken;    
     private final long startTime;
     private long endTime;
-    private List<String> failedList;
+    private Map<String, String> failedMap;
     private Throwable failureReason;
     
     private KarateStats(long startTime) {
         this.startTime = startTime;
     }
     
-    public void addToFailedList(String name) {
-        if (failedList == null) {
-            failedList = new ArrayList<>();
+    public void addToFailedList(String name, String errorMessage) {
+        if (failedMap == null) {
+            failedMap = new LinkedHashMap();
         }
-        failedList.add(name);
+        failedMap.put(name, errorMessage);
     }
     
     public static KarateStats startTimer() {
@@ -62,7 +64,7 @@ public class KarateStats {
 
     public Throwable getFailureReason() {
         return failureReason;
-    }        
+    }         
     
     public void addToTestCount(int count) {
         testCount += count;
@@ -86,20 +88,37 @@ public class KarateStats {
     
     public void printStats(int threadCount) {
         double elapsedTime = endTime - startTime;
-        System.out.println("=========================================================");
-        System.out.println(String.format("elapsed time: %f | test time: %f", elapsedTime / 1000, timeTaken));
+        System.out.println("Karate version: " + FileUtils.getKarateVersion());
+        System.out.println("====================================================");
+        System.out.println(String.format("elapsed time: %.2f | total thread time: %.2f", elapsedTime / 1000, timeTaken));
         double efficiency = 1000 * timeTaken / (elapsedTime * threadCount);
-        System.out.println(String.format("thread count: %2d | parallel efficiency: %f", threadCount, efficiency));
-        System.out.println(String.format("scenarios: %3d | failed: %3d | skipped: %3d", testCount, failCount, skipCount));
-        System.out.println("=========================================================");
-        if (failedList != null) {
-            System.out.println("failed: " + failedList);
+        System.out.println(String.format("features: %5d | threads: %3d | efficiency: %.2f", 
+                featureCount, threadCount, efficiency));
+        System.out.println(String.format("scenarios: %4d | failed: %4d | skipped: %4d", 
+                testCount, failCount, skipCount));
+        System.out.println("====================================================");
+        if (failedMap != null) {
+            System.out.println("failed features:");
+            failedMap.forEach((k, v) -> {
+                System.out.println(k + ": " + v);
+            });
         }
         if (failureReason != null) {
+            if (failCount == 0) {
+                failCount = 1;
+            }
             System.out.println("*** runner exception stack trace ***");
             failureReason.printStackTrace();
         }
     }
+
+    public void setFeatureCount(int featureCount) {
+        this.featureCount = featureCount;
+    }        
+
+    public int getFeatureCount() {
+        return featureCount;
+    }        
 
     public int getTestCount() {
         return testCount;
@@ -125,8 +144,8 @@ public class KarateStats {
         return endTime;
     }
 
-    public List<String> getFailedList() {
-        return failedList;
+    public Map<String, String> getFailedMap() {
+        return failedMap;
     }        
     
 }

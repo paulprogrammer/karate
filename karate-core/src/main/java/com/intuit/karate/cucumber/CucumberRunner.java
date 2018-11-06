@@ -23,27 +23,25 @@
  */
 package com.intuit.karate.cucumber;
 
-import com.intuit.karate.Script;
-import com.intuit.karate.ScriptEnv;
+import com.intuit.karate.CallContext;
+import com.intuit.karate.FileUtils;
 import com.intuit.karate.ScriptValueMap;
-import cucumber.runtime.RuntimeGlue;
-import cucumber.runtime.RuntimeOptions;
-import cucumber.runtime.RuntimeOptionsFactory;
-import cucumber.runtime.UndefinedStepsTracker;
-import cucumber.runtime.io.MultiLoader;
-import cucumber.runtime.io.ResourceLoader;
+import com.intuit.karate.filter.TagFilter;
+import com.intuit.karate.filter.TagFilterException;
 import cucumber.runtime.model.CucumberFeature;
-import cucumber.runtime.xstream.LocalizedXStreams;
-import gherkin.formatter.Formatter;
 import java.io.File;
+import java.net.URL;
 import java.util.ArrayList;
-import java.util.Collections;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
+import java.util.ServiceLoader;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+
+import cucumber.runtime.model.CucumberTagStatement;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -55,166 +53,72 @@ public class CucumberRunner {
 
     private static final Logger logger = LoggerFactory.getLogger(CucumberRunner.class);
 
-    private final ClassLoader classLoader;
-    private final RuntimeOptions runtimeOptions;
-    private final ResourceLoader resourceLoader;
-    private final List<FeatureFile> featureFiles;
-
-    public CucumberRunner(Class clazz) {
-        logger.debug("init test class: {}", clazz);
-        classLoader = clazz.getClassLoader();
-        RuntimeOptionsFactory runtimeOptionsFactory = new RuntimeOptionsFactory(clazz);
-        runtimeOptions = runtimeOptionsFactory.create();
-        resourceLoader = new MultiLoader(classLoader);
-        List<CucumberFeature> cfs = runtimeOptions.cucumberFeatures(resourceLoader);
-        featureFiles = new ArrayList<>(cfs.size());
-        for (CucumberFeature cf : cfs) {
-            featureFiles.add(new FeatureFile(cf, new File(cf.getPath())));
-        }
-    }
-
-    public CucumberRunner(File file) {
-        logger.debug("init feature file: {}", file);
-        classLoader = Thread.currentThread().getContextClassLoader();
-        resourceLoader = new MultiLoader(classLoader);
-        RuntimeOptionsFactory runtimeOptionsFactory = new RuntimeOptionsFactory(getClass());
-        runtimeOptions = runtimeOptionsFactory.create();
-        FeatureWrapper wrapper = FeatureWrapper.fromFile(file, classLoader);
-        CucumberFeature feature = wrapper.getFeature();
-        FeatureFile featureFile = new FeatureFile(feature, file);
-        featureFiles = Collections.singletonList(featureFile);
-    }
-
-    public List<CucumberFeature> getFeatures() {
-        List<CucumberFeature> list = new ArrayList<>(featureFiles.size());
-        for (FeatureFile featureFile : featureFiles) {
-            list.add(featureFile.feature);
-        }
-        return list;
-    }
-
-    public List<FeatureFile> getFeatureFiles() {
-        return featureFiles;
-    }
-
-    public RuntimeOptions getRuntimeOptions() {
-        return runtimeOptions;
-    }
-
-    public ClassLoader getClassLoader() {
-        return classLoader;
-    }
-
-    public KarateRuntime getRuntime(CucumberFeature feature) {
-        return getRuntime(new FeatureFile(feature, new File(feature.getPath())), null);
-    }
-
-    /**
-     * main cucumber bootstrap, common code for the default JUnit / TestNG
-     * runner and more importantly for Karate-s custom runner - such as the
-     * parallel one in the flow below, the ScriptEnv, the Backend and the
-     * ObjectFactory used by the backend are created fresh for each Feature file
-     * (and not re-used)
-     */
-    public KarateRuntime getRuntime(FeatureFile featureFile, KarateReporter reporter) {
-        File packageFile = featureFile.file;
-        String featurePath;
-        if (packageFile.exists()) { // loaded by karate
-            featurePath = packageFile.getAbsolutePath();
-        } else { // was loaded by cucumber-jvm, is relative to classpath
-            String temp = packageFile.getPath().replace('\\', '/'); // fix for windows
-            featurePath = classLoader.getResource(temp).getFile();
-        }
-        if (logger.isTraceEnabled()) {
-            logger.debug("loading feature: {}", featurePath);
-        }
-        File featureDir = new File(featurePath).getParentFile();
-        ScriptEnv env = new ScriptEnv(null, featureDir, packageFile.getName(), classLoader, reporter);
-        KarateBackend backend = new KarateBackend(env, null, null, false);
-        RuntimeGlue glue = new RuntimeGlue(new UndefinedStepsTracker(), new LocalizedXStreams(classLoader));
-        return new KarateRuntime(resourceLoader, classLoader, backend, runtimeOptions, glue);
-    }
-
-    // only called for TestNG ?
-    public void finish() {
-        Formatter formatter = runtimeOptions.formatter(classLoader);
-        formatter.done();
-        formatter.close();
-    }
-
-    public void run(FeatureFile featureFile, KarateReporter reporter) {
-        KarateRuntime runtime = getRuntime(featureFile, reporter);
-        featureFile.feature.run(reporter, reporter, runtime);
-    }
-
-    public void run(KarateReporter reporter) {
-        for (FeatureFile featureFile : getFeatureFiles()) {
-            run(featureFile, reporter);
-        }
-    }
-
-    private static KarateReporter getReporter(String reportDirPath, FeatureFile featureFile) {
-        File reportDir = new File(reportDirPath);
-        try {
-            reportDir.mkdirs();
-        } catch (Exception e) {
-            throw new RuntimeException(e);
-        }
-        String featurePath = featureFile.feature.getPath();
-        if (featurePath == null) {
-            featurePath = featureFile.file.getPath();
-        }
-        featurePath = new File(featurePath).getPath(); // fix for windows
-        String featurePackagePath = featurePath.replace(File.separator, ".");
-        if (featurePackagePath.endsWith(".feature")) {
-            featurePackagePath = featurePackagePath.substring(0, featurePackagePath.length() - 8);
-        }
-        try {
-            reportDirPath = reportDir.getPath() + File.separator;
-            String reportPath = reportDirPath + "TEST-" + featurePackagePath + ".xml";
-            return new KarateReporter(featurePackagePath, reportPath);
-        } catch (Exception e) {
-            throw new RuntimeException(e);
-        }
-    }
-
     public static KarateStats parallel(Class clazz, int threadCount) {
-        return parallel(clazz, threadCount, "target/surefire-reports");
+        return parallel(clazz, threadCount, null);
     }
 
     public static KarateStats parallel(Class clazz, int threadCount, String reportDir) {
+        KarateRuntimeOptions kro = new KarateRuntimeOptions(clazz);
+        List<KarateFeature> karateFeatures = KarateFeature.loadFeatures(kro);
+        return parallel(karateFeatures, threadCount, reportDir);
+    }
+
+    /**
+     * 
+     * @param tags - use a single list item (comma delimited) for OR, use multiple items for AND
+     * @param paths - can be paths to feature files or directories that will be scanned
+     * @param threadCount - number of threads for parallel runner
+     * @param reportDir - can be null, and defaults to "target/surefire-reports"
+     * @return stats object
+     */
+    public static KarateStats parallel(List<String> tags, List<String> paths, int threadCount, String reportDir) {
+        KarateRuntimeOptions kro = new KarateRuntimeOptions(tags, paths);
+        List<KarateFeature> karateFeatures = KarateFeature.loadFeatures(kro);
+        return parallel(karateFeatures, threadCount, reportDir);
+    }
+
+    public static KarateStats parallel(List<KarateFeature> karateFeatures, int threadCount, String userReportDir) {
+        String reportDir = userReportDir == null ? "target/surefire-reports" : userReportDir;
+        logger.info("Karate version: {}", FileUtils.getKarateVersion());
         KarateStats stats = KarateStats.startTimer();
         ExecutorService executor = Executors.newFixedThreadPool(threadCount);
         try {
-            CucumberRunner runner = new CucumberRunner(clazz);
-            List<FeatureFile> featureFiles = runner.getFeatureFiles();
-            List<Callable<KarateReporter>> callables = new ArrayList<>(featureFiles.size());
-            int count = featureFiles.size();
+            int count = karateFeatures.size();
+            int filteredCount = 0;
+            List<Callable<KarateJunitAndJsonReporter>> callables = new ArrayList<>(count);
             for (int i = 0; i < count; i++) {
+                KarateFeature karateFeature = karateFeatures.get(i);
                 int index = i + 1;
-                FeatureFile featureFile = featureFiles.get(i);
-                callables.add(() -> {
-                    String threadName = Thread.currentThread().getName();
-                    KarateReporter reporter = getReporter(reportDir, featureFile);
-                    if (logger.isTraceEnabled()) {
-                        logger.trace(">>>> feature {} of {} on thread {}: {}", index, count, threadName, featureFile.feature.getPath());
-                    }
-                    try {
-                        runner.run(featureFile, reporter);
-                        logger.info("<<<< feature {} of {} on thread {}: {}", index, count, threadName, featureFile.feature.getPath());
-                    } catch (Exception e) {
-                        logger.error("karate xml/json generation failed for: {}", featureFile.file);
-                        reporter.setFailureReason(e);
-                    } finally { // try our best to close the report file gracefully so that report generation is not broken
-                        reporter.done();
-                    }
-                    return reporter;
-                });
-            }            
-            List<Future<KarateReporter>> futures = executor.invokeAll(callables);
-            stats.stopTimer();            
-            for (Future<KarateReporter> future : futures) {
-                KarateReporter reporter = future.get(); // guaranteed to be not-null
+                CucumberFeature feature = karateFeature.getFeature();
+                filterOnTags(feature);
+                if (!feature.getFeatureElements().isEmpty()) {
+                    callables.add(() -> {
+                        // we are now within a separate thread. the reporter filters logs by self thread
+                        String threadName = Thread.currentThread().getName();
+                        KarateJunitAndJsonReporter reporter = karateFeature.getReporter(reportDir);
+                        KarateRuntime runtime = karateFeature.getRuntime(reporter);
+                        try {
+                            feature.run(reporter, reporter, runtime);
+                            runtime.afterFeature();
+                            logger.info("<<<< feature {} of {} on thread {}: {}", index, count, threadName, feature.getPath());
+                        } catch (Exception e) {
+                            logger.error("karate xml/json generation failed for: {}", feature.getPath());
+                            reporter.setFailureReason(e);
+                        } finally { // try our best to close the report file gracefully so that report generation is not broken
+                            reporter.done();
+                        }
+                        return reporter;
+                    });
+                } else {
+                    filteredCount++;
+                }
+            }
+            stats.setFeatureCount(count - filteredCount);
+
+            List<Future<KarateJunitAndJsonReporter>> futures = executor.invokeAll(callables);
+            stats.stopTimer();
+            for (Future<KarateJunitAndJsonReporter> future : futures) {
+                KarateJunitAndJsonReporter reporter = future.get(); // guaranteed to be not-null
                 KarateJunitFormatter formatter = reporter.getJunitFormatter();
                 if (reporter.getFailureReason() != null) {
                     logger.error("karate xml/json generation failed: {}", formatter.getFeaturePath());
@@ -225,34 +129,61 @@ public class CucumberRunner {
                 stats.addToSkipCount(formatter.getSkipCount());
                 stats.addToTimeTaken(formatter.getTimeTaken());
                 if (formatter.isFail()) {
-                    stats.addToFailedList(formatter.getFeaturePath());
+                    stats.addToFailedList(formatter.getFeaturePath(), formatter.getFailMessages() + "");
                 }
-            }            
+            }
         } catch (Exception e) {
             logger.error("karate parallel runner failed: ", e.getMessage());
             stats.setFailureReason(e);
         } finally {
-            executor.shutdownNow();                        
+            executor.shutdownNow();
         }
         stats.printStats(threadCount);
         return stats;
     }
 
-    private static Map<String, Object> runFeature(File file, Map<String, Object> vars) {
-        FeatureWrapper featureWrapper = FeatureWrapper.fromFile(file, Thread.currentThread().getContextClassLoader());
-        ScriptValueMap scriptValueMap = CucumberUtils.call(featureWrapper, null, vars, false);
-        return Script.simplify(scriptValueMap);
+    private static void filterOnTags(CucumberFeature feature) throws TagFilterException {
+        final List<CucumberTagStatement> featureElements = feature.getFeatureElements();
+        ServiceLoader<TagFilter> loader = ServiceLoader.load(TagFilter.class);
+        for (Iterator<CucumberTagStatement> iterator = featureElements.iterator(); iterator.hasNext();) {
+            CucumberTagStatement cucumberTagStatement = iterator.next();
+            for (TagFilter implClass : loader) {
+                logger.info("Tag filter found: {}", implClass.getClass().getSimpleName());
+                final boolean isFiltered = implClass.filter(feature, cucumberTagStatement);
+                if (isFiltered) {
+                    logger.info("skipping feature element {} of feature {} due to feature-tag-filter {} ",
+                            cucumberTagStatement.getVisualName(),
+                            feature.getPath(), implClass.getClass().getSimpleName());
+                    iterator.remove();
+                    break;
+                }
+            }
+        }
     }
 
-    public static Map<String, Object> runFeature(Class relativeTo, String path, Map<String, Object> vars) {
-        File dir = com.intuit.karate.FileUtils.getDirContaining(relativeTo);
-        File file = new File(dir.getPath() + File.separator + path);
-        return runFeature(file, vars);
+    public static Map<String, Object> runFeature(File file, Map<String, Object> vars, boolean evalKarateConfig) {
+        CallContext callContext = new CallContext(vars, evalKarateConfig);
+        return runFeature(file, callContext, null);
     }
 
-    public static Map<String, Object> runClasspathFeature(String path, Map<String, Object> vars) {
-        File file = new File("target/test-classes/" + path);
-        return runFeature(file, vars);
+    public static Map<String, Object> runFeature(File file, CallContext callContext, KarateReporter reporter) {
+        FeatureWrapper featureWrapper = FeatureWrapper.fromFile(file, reporter);
+        ScriptValueMap scriptValueMap = CucumberUtils.callSync(featureWrapper, callContext);
+        return scriptValueMap.toPrimitiveMap();
+    }
+
+    public static Map<String, Object> runFeature(Class relativeTo, String path, Map<String, Object> vars, boolean evalKarateConfig) {
+        File file = FileUtils.getFileRelativeTo(relativeTo, path);
+        return runFeature(file, vars, evalKarateConfig);
+    }
+
+    public static Map<String, Object> runClasspathFeature(String classPath, Map<String, Object> vars, boolean evalKarateConfig) {
+        URL url = Thread.currentThread().getContextClassLoader().getResource(classPath);
+        if (url == null) {
+            throw new RuntimeException("file not found: " + classPath);
+        }
+        File file = new File(url.getFile());
+        return runFeature(file, vars, evalKarateConfig);
     }
 
 }

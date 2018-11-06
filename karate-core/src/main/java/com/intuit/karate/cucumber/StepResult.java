@@ -32,14 +32,20 @@ import gherkin.formatter.model.Step;
  */
 public class StepResult {
     
+    public static final String ABORTED = "aborted";
+    public static final Result PASSED = new Result(Result.PASSED, null, null);
+    public static final Object DUMMY_OBJECT = new Object();
+    
     private final Step step;
     private final Result result;
-    private final Throwable error;
+    private final boolean pass;
+    private final boolean abort;
 
-    public StepResult(Step step, Result result, Throwable error) {
+    public StepResult(Step step, Result result) {
         this.step = step;
         this.result = result;
-        this.error = error;        
+        pass = result.getError() == null;
+        abort = result.getStatus().equals(ABORTED);
     }
 
     public Step getStep() {
@@ -51,11 +57,15 @@ public class StepResult {
     }        
 
     public Throwable getError() {
-        return error;
+        return result.getError();
     }    
 
     public boolean isPass() {
-        return error == null;
+        return pass;
+    }    
+
+    public boolean isAbort() {
+        return abort;
     }
-    
+        
 }

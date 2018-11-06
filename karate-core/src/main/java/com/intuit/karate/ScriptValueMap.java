@@ -1,6 +1,7 @@
 package com.intuit.karate;
 
 import java.util.HashMap;
+import java.util.Map;
 
 /**
  *
@@ -14,6 +15,15 @@ public class ScriptValueMap extends HashMap<String, ScriptValue> {
     public static final String VAR_RESPONSE_STATUS = "responseStatus";
     public static final String VAR_RESPONSE_TIME = "responseTime";
 
+    public static final String VAR_REQUEST = "request";
+    public static final String VAR_REQUEST_URL_BASE = "requestUrlBase";
+    public static final String VAR_REQUEST_URI = "requestUri";
+    public static final String VAR_REQUEST_METHOD = "requestMethod";
+    public static final String VAR_REQUEST_HEADERS = "requestHeaders";
+    public static final String VAR_REQUEST_PARAMS = "requestParams";
+    public static final String VAR_REQUEST_BODY = "requestBody";
+    public static final String VAR_REQUEST_TIME_STAMP = "requestTimeStamp";
+
     public ScriptValue put(String key, Object value) {
         ScriptValue sv = new ScriptValue(value);
         return super.put(key, sv);
@@ -25,6 +35,16 @@ public class ScriptValueMap extends HashMap<String, ScriptValue> {
             return null;
         }
         return sv.getValue(clazz);
+    }
+
+    public Map<String, Object> toPrimitiveMap() {
+        return new ScriptObjectMap(this);
+    }
+
+    public ScriptValueMap copy() {
+        ScriptValueMap copy = new ScriptValueMap();
+        forEach((k, v) -> copy.put(k, v));
+        return copy;
     }
 
 }
