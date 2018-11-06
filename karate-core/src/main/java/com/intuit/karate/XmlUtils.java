@@ -25,15 +25,16 @@ package com.intuit.karate;
 
 import com.jayway.jsonpath.DocumentContext;
 import com.jayway.jsonpath.JsonPath;
-import java.io.ByteArrayInputStream;
+import java.io.IOException;
 import java.io.InputStream;
+import java.io.StringReader;
 import java.io.StringWriter;
-import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import javax.xml.XMLConstants;
 import javax.xml.parsers.DocumentBuilder;
 import javax.xml.parsers.DocumentBuilderFactory;
 import javax.xml.transform.OutputKeys;
@@ -44,12 +45,17 @@ import javax.xml.transform.stream.StreamResult;
 import javax.xml.xpath.XPath;
 import javax.xml.xpath.XPathConstants;
 import javax.xml.xpath.XPathExpression;
+import javax.xml.xpath.XPathExpressionException;
 import javax.xml.xpath.XPathFactory;
+import org.w3c.dom.Attr;
 import org.w3c.dom.Document;
 import org.w3c.dom.Element;
 import org.w3c.dom.NamedNodeMap;
 import org.w3c.dom.Node;
 import org.w3c.dom.NodeList;
+import org.xml.sax.EntityResolver;
+import org.xml.sax.InputSource;
+import org.xml.sax.SAXException;
 
 /**
  *
@@ -79,6 +85,8 @@ public class XmlUtils {
             if (pretty) {
                 transformer.setOutputProperty(OutputKeys.INDENT, "yes");
                 transformer.setOutputProperty("{http://xml.apache.org/xslt}indent-amount", "2");
+            } else {
+                transformer.setOutputProperty(OutputKeys.INDENT, "no");
             }
             transformer.transform(domSource, result);
             return writer.toString();
@@ -93,18 +101,39 @@ public class XmlUtils {
         for (int i = 0; i < count; ++i) {
             Node child = children.item(i);
             if (child.getNodeType() == Node.TEXT_NODE) {
-                child.setTextContent(child.getTextContent().trim());
+                child.setTextContent(child.getTextContent() == null ? "" : child.getTextContent().trim());
             }
             trimWhiteSpace(child);
         }
+    }
+
+    private static class DtdEntityResolver implements EntityResolver {
+
+        protected boolean dtdPresent;
+
+        @Override
+        public InputSource resolveEntity(String publicId, String systemId) throws SAXException, IOException {
+            dtdPresent = true;
+            return new InputSource(new StringReader(""));
+        }
+
     }
 
     public static Document toXmlDoc(String xml) {
         DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
         try {
             DocumentBuilder builder = factory.newDocumentBuilder();
-            InputStream is = new ByteArrayInputStream(xml.getBytes(StandardCharsets.UTF_8));
-            return builder.parse(is);
+            DtdEntityResolver dtdEntityResolver = new DtdEntityResolver();
+            builder.setEntityResolver(dtdEntityResolver);
+            InputStream is = FileUtils.toInputStream(xml);
+            Document doc = builder.parse(is);
+            if (dtdEntityResolver.dtdPresent) { // DOCTYPE present
+                // the XML was not parsed, but I think it hangs at the root as a text node
+                // so conversion to string and back has the effect of discarding the DOCTYPE !
+                return toXmlDoc(toString(doc, false));
+            } else {
+                return doc;
+            }
         } catch (Exception e) {
             throw new RuntimeException(e);
         }
@@ -129,12 +158,66 @@ public class XmlUtils {
         }
     }
 
-    public static Node getNodeByPath(Node node, String path) {
-        XPathExpression expr = compile(path);
+    public static String stripNameSpacePrefixes(String path) {
+        if (path.indexOf(':') == -1) {
+            return path;
+        }
+        StringBuilder sb = new StringBuilder();
+        for (String s : StringUtils.split(path, '/')) {
+            sb.append('/');
+            int pos = s.lastIndexOf(':');
+            if (pos == -1) {
+                sb.append(s);
+            } else {
+                sb.append(s.substring(pos + 1));
+            }
+        }
+        return sb.toString();
+    }
+
+    public static Node getNodeByPath(Node node, String path, boolean create) {
+        String searchPath = create ? stripNameSpacePrefixes(path) : path;
+        XPathExpression expr = compile(searchPath);
+        Node result;
         try {
-            return (Node) expr.evaluate(node, XPathConstants.NODE);
-        } catch (Exception e) {
+            result = (Node) expr.evaluate(node, XPathConstants.NODE);
+        } catch (XPathExpressionException e) {
             throw new RuntimeException(e);
+        }
+        if (result == null && create) {
+            Document doc = node.getNodeType() == Node.DOCUMENT_NODE ? (Document) node : node.getOwnerDocument();
+            return createNodeByPath(doc, path);
+        } else {
+            return result;
+        }
+    }
+
+    public static Node createNodeByPath(Document doc, String path) {
+        int pos = path.lastIndexOf('/');
+        if (pos == 0) { // root
+            Node root = doc.getDocumentElement();
+            if (root == null) {
+                root = createElement(doc, path.substring(1), null, null);
+                doc.appendChild(root);
+            }
+            return root;
+        }
+        String left = path.substring(0, pos);
+        Node parent = getNodeByPath(doc, left, true);
+        String right = path.substring(pos + 1);
+        if (right.startsWith("@")) { // attribute
+            Element parentElement = (Element) parent;
+            right = right.substring(1);
+            parentElement.setAttribute(right, "");
+            return parentElement.getAttributeNode(right);
+        } else {
+            int bracketPos = right.indexOf('[');
+            if (bracketPos != -1) { // index, we assume it is 1 and still append
+                right = right.substring(0, bracketPos);
+            }
+            Element element = createElement(parent, right, null, null);
+            parent.appendChild(element);
+            return element;
         }
     }
 
@@ -148,22 +231,29 @@ public class XmlUtils {
     }
 
     public static void setByPath(Node doc, String path, String value) {
-        Node node = getNodeByPath(doc, path);
-        if (node.hasChildNodes() && node.getFirstChild().getNodeType() == Node.TEXT_NODE) {
-            node.getFirstChild().setTextContent(value);
-        } else {
+        Node node = getNodeByPath(doc, path, true);
+        if (node.getNodeType() == Node.ATTRIBUTE_NODE) {
             node.setNodeValue(value);
+        } else if (node.hasChildNodes() && node.getFirstChild().getNodeType() == Node.TEXT_NODE) {
+            node.getFirstChild().setTextContent(value);
+        } else if (node.getNodeType() == Node.ELEMENT_NODE) {
+            node.setTextContent(value);
         }
     }
 
     public static void removeByPath(Document doc, String path) {
-        Node node = getNodeByPath(doc, path);
+        Node node = getNodeByPath(doc, path, false);
         if (node == null) {
             return;
         }
-        Node parent = node.getParentNode();
-        if (parent != null) {
-            parent.removeChild(node);
+        if (node.getNodeType() == Node.ATTRIBUTE_NODE) {
+            Element parent = ((Attr) node).getOwnerElement();
+            parent.removeAttribute(node.getNodeName());
+        } else {
+            Node parent = node.getParentNode();
+            if (parent != null) {
+                parent.removeChild(node);
+            }
         }
     }
 
@@ -171,7 +261,7 @@ public class XmlUtils {
         if (in.getNodeType() == Node.DOCUMENT_NODE) {
             in = in.getFirstChild();
         }
-        Node node = getNodeByPath(doc, path);
+        Node node = getNodeByPath(doc, path, true);
         if (node == null) {
             throw new RuntimeException("no results for xpath: " + path);
         }
@@ -214,7 +304,7 @@ public class XmlUtils {
     private static Object getElementAsObject(Node node) {
         int childElementCount = getChildElementCount(node);
         if (childElementCount == 0) {
-            return node.getTextContent();
+            return StringUtils.trimToNull(node.getTextContent());
         }
         Map<String, Object> map = new LinkedHashMap<>(childElementCount);
         NodeList nodes = node.getChildNodes();
@@ -225,7 +315,7 @@ public class XmlUtils {
                 continue;
             }
             String childName = child.getNodeName();
-            Object childValue = child.hasChildNodes() ? toObject(child) : null;
+            Object childValue = toObject(child);
             // auto detect repeating elements
             if (map.containsKey(childName)) {
                 Object temp = map.get(childName);
@@ -279,10 +369,10 @@ public class XmlUtils {
     public static List<Element> fromObject(Document doc, String name, Object o) {
         if (o instanceof Map) {
             Map<String, Object> map = (Map) o;
+            Map<String, Object> attribs = (Map) map.get("@");
             Object value = map.get("_");
-            if (value != null) {
+            if (value != null || attribs != null) {
                 List<Element> elements = fromObject(doc, name, value);
-                Map<String, Object> attribs = (Map) map.get("@");
                 addAttributes(elements.get(0), attribs);
                 return elements;
             } else {

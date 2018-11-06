@@ -2,11 +2,10 @@ package com.intuit.karate;
 
 import com.jayway.jsonpath.DocumentContext;
 import com.jayway.jsonpath.JsonPath;
+import java.io.InputStream;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.Map;
-import org.apache.commons.io.IOUtils;
-import org.apache.commons.lang3.tuple.Pair;
 import org.junit.Test;
 import static org.junit.Assert.*;
 import org.slf4j.Logger;
@@ -83,21 +82,27 @@ public class JsonUtilsTest {
         doc = JsonUtils.toJsonDoc("[{ foo: 'bar'}]");
         JsonUtils.setValueByPath(doc, "$[1]", JsonUtils.toJsonDoc("{ foo: 'baz' }").read("$"));
         assertEquals("[{\"foo\":\"bar\"},{\"foo\":\"baz\"}]", doc.jsonString());
+        doc = JsonUtils.toJsonDoc("{}");
+        JsonUtils.setValueByPath(doc, "$.foo.bar", 1);
+        assertEquals("{\"foo\":{\"bar\":1}}", doc.jsonString());
+        doc = JsonUtils.toJsonDoc("[]");
+        JsonUtils.setValueByPath(doc, "$[0].foo.bar", 1);
+        assertEquals("[{\"foo\":{\"bar\":1}}]", doc.jsonString());
     }
 
     @Test
     public void testParsingParentAndLeafName() {
-        assertEquals(Pair.of("", "$"), JsonUtils.getParentAndLeafPath("$"));
-        assertEquals(Pair.of("$", "foo"), JsonUtils.getParentAndLeafPath("$.foo"));
-        assertEquals(Pair.of("$", "['foo']"), JsonUtils.getParentAndLeafPath("$['foo']"));
-        assertEquals(Pair.of("$.foo", "bar"), JsonUtils.getParentAndLeafPath("$.foo.bar"));
-        assertEquals(Pair.of("$.foo", "['bar']"), JsonUtils.getParentAndLeafPath("$.foo['bar']"));
-        assertEquals(Pair.of("$.foo", "bar[0]"), JsonUtils.getParentAndLeafPath("$.foo.bar[0]"));
-        assertEquals(Pair.of("$.foo", "['bar'][0]"), JsonUtils.getParentAndLeafPath("$.foo['bar'][0]"));
-        assertEquals(Pair.of("$.foo[2]", "bar[0]"), JsonUtils.getParentAndLeafPath("$.foo[2].bar[0]"));
-        assertEquals(Pair.of("$.foo[2]", "['bar'][0]"), JsonUtils.getParentAndLeafPath("$.foo[2]['bar'][0]"));
-        assertEquals(Pair.of("$.foo[2]", "bar"), JsonUtils.getParentAndLeafPath("$.foo[2].bar"));
-        assertEquals(Pair.of("$.foo[2]", "['bar']"), JsonUtils.getParentAndLeafPath("$.foo[2]['bar']"));
+        assertEquals(StringUtils.pair("", "$"), JsonUtils.getParentAndLeafPath("$"));
+        assertEquals(StringUtils.pair("$", "foo"), JsonUtils.getParentAndLeafPath("$.foo"));
+        assertEquals(StringUtils.pair("$", "['foo']"), JsonUtils.getParentAndLeafPath("$['foo']"));
+        assertEquals(StringUtils.pair("$.foo", "bar"), JsonUtils.getParentAndLeafPath("$.foo.bar"));
+        assertEquals(StringUtils.pair("$.foo", "['bar']"), JsonUtils.getParentAndLeafPath("$.foo['bar']"));
+        assertEquals(StringUtils.pair("$.foo", "bar[0]"), JsonUtils.getParentAndLeafPath("$.foo.bar[0]"));
+        assertEquals(StringUtils.pair("$.foo", "['bar'][0]"), JsonUtils.getParentAndLeafPath("$.foo['bar'][0]"));
+        assertEquals(StringUtils.pair("$.foo[2]", "bar[0]"), JsonUtils.getParentAndLeafPath("$.foo[2].bar[0]"));
+        assertEquals(StringUtils.pair("$.foo[2]", "['bar'][0]"), JsonUtils.getParentAndLeafPath("$.foo[2]['bar'][0]"));
+        assertEquals(StringUtils.pair("$.foo[2]", "bar"), JsonUtils.getParentAndLeafPath("$.foo[2].bar"));
+        assertEquals(StringUtils.pair("$.foo[2]", "['bar']"), JsonUtils.getParentAndLeafPath("$.foo[2]['bar']"));
     }
 
     @Test
@@ -109,7 +114,8 @@ public class JsonUtilsTest {
 
     @Test
     public void testYamlToMutation() throws Exception {
-        String yaml = IOUtils.toString(getClass().getResourceAsStream("mutation.yaml"), "utf-8");
+        InputStream is = getClass().getResourceAsStream("mutation.yaml");
+        String yaml = FileUtils.toString(is);
         DocumentContext doc = JsonUtils.fromYaml(yaml);
         assertTrue(doc.jsonString().contains("[\"id\",\"name\",\"notes\",\"deleted\"]"));
     }
@@ -153,8 +159,31 @@ public class JsonUtilsTest {
         ComplexPojo temp = (ComplexPojo) JsonUtils.fromJson(s, ComplexPojo.class.getName());
         assertEquals(temp.getFoo(), "testFoo");
         assertEquals(2, temp.getBan().size());
+        temp = JsonUtils.fromJson(s, ComplexPojo.class);
+        assertEquals(temp.getFoo(), "testFoo");
+        assertEquals(2, temp.getBan().size());        
         s = XmlUtils.toXml(pojo);
         assertEquals(s, "<root><bar>1</bar><foo>testFoo</foo><baz/><ban><bar>0</bar><foo>p1</foo><baz/><ban/></ban><ban><bar>0</bar><foo>p2</foo><baz/><ban/></ban></root>");
     }
+    
+    @Test
+    public void testEmptyJsonObject() {
+        DocumentContext doc = JsonUtils.emptyJsonObject();
+        String json = doc.jsonString();
+        assertEquals("{}", json);
+    }
+    
+    @Test
+    public void testEmptyJsonArray() {
+        DocumentContext doc = JsonUtils.emptyJsonArray(0);
+        String json = doc.jsonString();
+        assertEquals("[]", json);
+        doc = JsonUtils.emptyJsonArray(1);
+        json = doc.jsonString();
+        assertEquals("[{}]", json);
+        doc = JsonUtils.emptyJsonArray(2);
+        json = doc.jsonString();
+        assertEquals("[{},{}]", json);         
+    }      
 
 }

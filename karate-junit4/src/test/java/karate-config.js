@@ -1,13 +1,11 @@
 function() {   
   var env = karate.env; // get system property 'karate.env'
-  karate.log('karate.env system property was:', env);
   if (!env) {
     env = 'dev';
   }
   var config = {
     env: env,
-    testConfig: 'bar',
-    wiremockPort: karate.properties['wiremock.port']
+    testConfig: 'bar'
   }
   if (env == 'dev') {
     // customize
@@ -15,5 +13,6 @@ function() {
   } else if (env == 'e2e') {
     // customize
   }
+  config.myObject = karate.read('classpath:test.json');
   return config;
 }

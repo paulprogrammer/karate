@@ -1,7 +1,6 @@
 package demo.greeting;
 
 import com.intuit.karate.junit4.Karate;
-import org.junit.Test;
 import org.junit.runner.RunWith;
 
 /**
@@ -10,10 +9,5 @@ import org.junit.runner.RunWith;
  */
 @RunWith(Karate.class)
 public class GreetingStandaloneRunner {
-    
-    @Test
-    public void testOnPort8080() {
-        
-    }
     
 }

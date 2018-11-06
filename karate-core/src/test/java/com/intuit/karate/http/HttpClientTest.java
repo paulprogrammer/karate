@@ -23,6 +23,7 @@
  */
 package com.intuit.karate.http;
 
+import com.intuit.karate.CallContext;
 import com.intuit.karate.FileUtils;
 import com.intuit.karate.ScriptContext;
 import com.intuit.karate.ScriptEnv;
@@ -41,7 +42,8 @@ public class HttpClientTest {
     private ScriptContext getContext() {
         String featureDir = FileUtils.getDirContaining(getClass()).getPath();
         ScriptEnv env = ScriptEnv.init("dev", new File(featureDir));
-        return new ScriptContext(env, null, null);
+        CallContext callContext = new CallContext(null, true);
+        return new ScriptContext(env, callContext);
     }    
     
     @Test
@@ -52,7 +54,7 @@ public class HttpClientTest {
         config.setUserDefined(map);
         config.setClientClass("com.intuit.karate.http.CustomDummyHttpClient");
         HttpClient client = HttpClient.construct(config, getContext());
-        HttpResponse response = client.makeHttpRequest(null, 0);
+        HttpResponse response = client.makeHttpRequest(null, null);
         assertArrayEquals(response.getBody(), "hello John".getBytes());        
     }
     

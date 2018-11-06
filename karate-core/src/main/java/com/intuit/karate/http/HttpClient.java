@@ -28,7 +28,6 @@ import com.intuit.karate.ScriptContext;
 import com.intuit.karate.ScriptValue;
 import com.intuit.karate.XmlUtils;
 import com.jayway.jsonpath.DocumentContext;
-import com.jayway.jsonpath.JsonPath;
 import java.io.InputStream;
 import java.util.List;
 import java.util.Map;
@@ -52,7 +51,7 @@ public abstract class HttpClient<T> {
 
     private static final String KARATE_HTTP_PROPERTIES = "karate-http.properties";
 
-    protected HttpRequest request;
+    protected HttpRequestBuilder request;
 
     /**
      * guaranteed to be called once if empty constructor was used
@@ -80,53 +79,38 @@ public abstract class HttpClient<T> {
 
     protected abstract void buildCookie(Cookie cookie);
 
-    protected abstract HttpResponse makeHttpRequest(T entity, long startTime);
+    protected abstract HttpResponse makeHttpRequest(T entity, ScriptContext context);
 
     protected abstract String getRequestUri();
 
     private T getEntityInternal(ScriptValue body, String mediaType) {
-        switch (body.getType()) {
-            case JSON:
-                if (mediaType == null) {
-                    mediaType = APPLICATION_JSON;
-                }
-                DocumentContext json = body.getValue(DocumentContext.class);
-                return getEntity(json.jsonString(), mediaType);
-            case MAP:
-                if (mediaType == null) {
-                    mediaType = APPLICATION_JSON;
-                }
-                Map<String, Object> map = body.getValue(Map.class);
-                DocumentContext mapDoc = JsonPath.parse(map);
-                return getEntity(mapDoc.jsonString(), mediaType);
-            case LIST:
-                if (mediaType == null) {
-                    mediaType = APPLICATION_JSON;
-                }
-                List list = body.getValue(List.class);
-                DocumentContext listDoc = JsonPath.parse(list);
-                return getEntity(listDoc.jsonString(), mediaType);
-            case XML:
-                Node node = body.getValue(Node.class);
-                if (mediaType == null) {
-                    mediaType = APPLICATION_XML;
-                }
-                return getEntity(XmlUtils.toString(node), mediaType);
-            case INPUT_STREAM:
-                InputStream is = body.getValue(InputStream.class);
-                if (mediaType == null) {
-                    mediaType = APPLICATION_OCTET_STREAM;
-                }
-                return getEntity(is, mediaType);
-            default:
-                if (mediaType == null) {
-                    mediaType = TEXT_PLAIN;
-                }
-                return getEntity(body.getAsString(), mediaType);
+        if (body.isJsonLike()) {
+            if (mediaType == null) {
+                mediaType = APPLICATION_JSON;
+            }
+            DocumentContext json = body.getAsJsonDocument();
+            return getEntity(json.jsonString(), mediaType);
+        } else if (body.isXml()) {
+            Node node = body.getValue(Node.class);
+            if (mediaType == null) {
+                mediaType = APPLICATION_XML;
+            }
+            return getEntity(XmlUtils.toString(node), mediaType);
+        } else if (body.isStream()) {
+            InputStream is = body.getValue(InputStream.class);
+            if (mediaType == null) {
+                mediaType = APPLICATION_OCTET_STREAM;
+            }
+            return getEntity(is, mediaType);
+        } else {
+            if (mediaType == null) {
+                mediaType = TEXT_PLAIN;
+            }
+            return getEntity(body.getAsString(), mediaType);
         }
     }
 
-    private T buildRequestInternal(HttpRequest request, ScriptContext context) {
+    private T buildRequestInternal(HttpRequestBuilder request, ScriptContext context) {
         String method = request.getMethod();
         if (method == null) {
             String msg = "'method' is required to make an http call";
@@ -136,6 +120,11 @@ public abstract class HttpClient<T> {
         method = method.toUpperCase();
         request.setMethod(method);
         this.request = request;
+        boolean methodRequiresBody
+                = "POST".equals(method)
+                || "PUT".equals(method)
+                || "PATCH".equals(method)
+                || "DELETE".equals(method);
         String url = request.getUrl();
         if (url == null) {
             String msg = "url not set, please refer to the keyword documentation for 'url'";
@@ -153,6 +142,13 @@ public abstract class HttpClient<T> {
                 buildParam(entry.getKey(), entry.getValue().toArray());
             }
         }
+        if (request.getFormFields() != null && !methodRequiresBody) {
+            // not POST, move form-fields to params
+            for (Map.Entry<String, List> entry : request.getFormFields().entrySet()) {
+                buildParam(entry.getKey(), entry.getValue().toArray());
+            }
+
+        }
         if (request.getHeaders() != null) {
             for (Map.Entry<String, List> entry : request.getHeaders().entrySet()) {
                 for (Object value : entry.getValue()) {
@@ -160,7 +156,8 @@ public abstract class HttpClient<T> {
                 }
             }
         }
-        Map<String, Object> configHeaders = context.getConfigHeaders().evalAsMap(context);
+        HttpConfig config = context.getConfig();
+        Map<String, Object> configHeaders = config.getHeaders().evalAsMap(context);
         if (configHeaders != null) {
             for (Map.Entry<String, Object> entry : configHeaders.entrySet()) {
                 buildHeader(entry.getKey(), entry.getValue(), true);
@@ -171,11 +168,11 @@ public abstract class HttpClient<T> {
                 buildCookie(cookie);
             }
         }
-        Map<String, Object> configCookies = context.getConfigCookies().evalAsMap(context);
+        Map<String, Object> configCookies = config.getCookies().evalAsMap(context);
         for (Cookie cookie : Cookie.toCookies(configCookies)) {
             buildCookie(cookie);
-        }       
-        if ("POST".equals(method) || "PUT".equals(method) || "PATCH".equals(method) || "DELETE".equals(method)) {
+        }
+        if (methodRequiresBody) {
             String mediaType = request.getContentType();
             if (request.getMultiPartItems() != null) {
                 if (mediaType == null) {
@@ -183,7 +180,10 @@ public abstract class HttpClient<T> {
                 }
                 return getEntity(request.getMultiPartItems(), mediaType);
             } else if (request.getFormFields() != null) {
-                return getEntity(request.getFormFields(), APPLICATION_FORM_URLENCODED);
+                if (mediaType == null) {
+                    mediaType = APPLICATION_FORM_URLENCODED;
+                }
+                return getEntity(request.getFormFields(), mediaType);
             } else {
                 ScriptValue body = request.getBody();
                 if ((body == null || body.isNull())) {
@@ -194,9 +194,6 @@ public abstract class HttpClient<T> {
                         throw new RuntimeException(msg);
                     }
                 }
-                if (context.isLogPrettyRequest() && context.logger.isDebugEnabled()) {
-                    context.logger.debug("request:\n{}", body.getAsPrettyString());
-                }
                 return getEntityInternal(body, mediaType);
             }
         } else {
@@ -204,27 +201,20 @@ public abstract class HttpClient<T> {
         }
     }
 
-    protected static long getResponseTime(long startTime) {
-        long endTime = System.currentTimeMillis();
-        long responseTime = endTime - startTime;
-        return responseTime;
-    }
-
-    public HttpResponse invoke(HttpRequest request, ScriptContext context) {
-        T body = buildRequestInternal(request, context);
-        long startTime = System.currentTimeMillis();
+    public HttpResponse invoke(HttpRequestBuilder request, ScriptContext context) {
+        T body = buildRequestInternal(request, context);        
         try {
-            HttpResponse response = makeHttpRequest(body, startTime);
-            context.logger.debug("response time in milliseconds: {}", response.getTime());
+            HttpResponse response = makeHttpRequest(body, context);
             context.updateConfigCookies(response.getCookies());
             return response;
         } catch (Exception e) {
-            long responseTime = getResponseTime(startTime);
+            long startTime = context.getPrevRequest().getStartTime();
+            long responseTime = System.currentTimeMillis() - startTime;
             String message = "http call failed after " + responseTime + " milliseconds for URL: " + getRequestUri();
             context.logger.error(e.getMessage() + ", " + message);
             throw new KarateException(message, e);
         }
-    }        
+    }
 
     public static HttpClient construct(String className) {
         try {
@@ -241,7 +231,7 @@ public abstract class HttpClient<T> {
         }
         try {
             String className;
-            if (config != null && config.getClientClass() != null) {
+            if (config.getClientClass() != null) {
                 className = config.getClientClass();
             } else {
                 InputStream is = Thread.currentThread().getContextClassLoader().getResourceAsStream(KARATE_HTTP_PROPERTIES);

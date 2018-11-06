@@ -11,6 +11,9 @@ Scenario: syntax examples
 * assert testConfig == 'bar'
 * print 'hello world'
 
+# complex 'global' json loaded in karate-config.js
+* match myObject == { error: [{id: 1},{id: 2}] }
+
 * def a = 1
 * def b = 2
 * def c = a + b
@@ -58,30 +61,34 @@ Scenario: syntax examples
 * set myJson.zee[0] = 5
 * match myJson == { foo: 'world', hey: 'ho', zee: [5] }
 
+# omit the array index to append
+* set myJson.zee[] = 6
+* match myJson == { foo: 'world', hey: 'ho', zee: [5, 6] }
+
+
 # json chunks
 * set myJson.cat = { name: 'Billie' }
-* match myJson == { foo: 'world', hey: 'ho', zee: [5], cat: { name: 'Billie' } }
+* match myJson == { foo: 'world', hey: 'ho', zee: [5, 6], cat: { name: 'Billie' } }
 
 # and the order of keys does not matter
-* match myJson == { cat: { name: 'Billie' }, hey: 'ho', foo: 'world', zee: [5] }
+* match myJson == { cat: { name: 'Billie' }, hey: 'ho', foo: 'world', zee: [5, 6] }
 
 # you can ignore fields marked as #ignore
-* match myJson == { cat: '#ignore', hey: 'ho', foo: 'world', zee: [5] }
+* match myJson == { cat: '#ignore', hey: 'ho', foo: 'world', zee: [5, 6] }
 
 # remove keys
 * remove myJson.cat
-* match myJson == { foo: 'world', hey: 'ho', zee: [5] }
+* match myJson == { foo: 'world', hey: 'ho', zee: [5, 6] }
 * remove myJson.hey
-* match myJson == { foo: 'world', zee: [5] }
+* match myJson == { foo: 'world', zee: [5, 6] }
 
-# append to array
-* set myJson.zee[1] = 6
-* set myJson.zee[2] = 7
-* match myJson == { foo: 'world', zee: [5, 6, 7] }
+# replace an array element
+* set myJson.zee[1] = 7
+* match myJson == { foo: 'world', zee: [5, 7] }
 
 # remove array element by index
 * remove myJson.zee[1]
-* match myJson == { foo: 'world', zee: [5, 7] }
+* match myJson == { foo: 'world', zee: [5] }
 
 # remove doc example
 * def json = { foo: 'world', hey: 'ho', zee: [1, 2, 3] }
@@ -129,7 +136,7 @@ Then match cat / == <cat><name>Jean</name></cat>
   <Properties/>
 </root>
 """
-* def documentId = myXml/root/EntityId
+* def documentId = $myXml/root/EntityId
 * assert documentId == 'a9f7a56b-8d5c-455c-9d13-808461d17b91'
 
 # more xml
@@ -137,7 +144,7 @@ Then match cat / == <cat><name>Jean</name></cat>
 # sadly, xpath list indexes start from 1
 * match cat/cat/scores/score[2] == '5'
 # but karate allows you to traverse xml like json
-* match cat.cat.scores.score[1] == 5
+* match cat.cat.scores.score[1] == '5'
 
 # functions !
 * def adder = function(a, b) { return a + b }
@@ -275,6 +282,19 @@ Then match cat == { name: '#string', type: '#string', id: '#string'}
 * def cat = { foo: { bar: 'baz' } }
 * match cat == { foo: '#object' }
 
+# non-json fuzzy matches
+* def foo = 1
+* match foo == '#number'
+* match foo != '#string'
+
+* def foo = 'bar'
+* match foo == '#string'
+* match foo != '#null'
+
+* def foo = null
+* match foo == '#null'
+* match foo != '#notnull'
+
 # schema validation
 * def date = { month: 3 }
 * match date == { month: '#? _ > 0 && _ < 13' }
@@ -312,6 +332,20 @@ Given def cat =
 # normal 'equality' match. note the wildcard '*' in the JsonPath (returns an array)
 Then match cat.kittens[*].id == [23, 42]
 
+# this short-cut instead of get is also allowed, and can be mixed into match expressions
+* def kitnames = $cat.kittens[*].name
+* match kitnames == ['Bob', 'Wild']
+* match kitnames == $cat.kittens[*].name
+
+# get by index - instead of this
+* def kitnums = get cat.kittens[*].id
+* def first = kitnums[0]
+* match first == 23
+
+# you can do this in one line
+* def first = get[0] cat.kittens[*].id
+* match first == 23
+
 # when inspecting a json array, 'contains' just checks if the expected items exist
 # and the size and order of the actual array does not matter
 Then match cat.kittens[*].id contains 23
@@ -345,8 +379,12 @@ Given def text = read('demo-text.txt')
 Then match text == 'Hello World!'
 Then assert text == 'Hello World!'
 
+# not equals
+Then match text != 'blah'
+
 # contains for strings
 Then match text contains 'World'
+And match text !contains 'blah'
 
 * def hello = 'Hello World!'
 * match hello == 'Hello World!'
@@ -401,7 +439,7 @@ Then match pdf == read('test.pdf')
 * print 'current balance: ' + currentBalance
 
 # data tables to json
-* table cats =
+* table cats
     | name   | age |
     | 'Bob'  | 2   |
     | 'Wild' | 4   |
@@ -411,7 +449,7 @@ Then match pdf == read('test.pdf')
 
 # json path in js
 * def foo = { bar: [{baz: 1}, {baz: 2}, {baz: 3}]}
-* def fun = function(){ return karate.get('foo.bar[*].baz') }
+* def fun = function(){ return karate.get('$foo.bar[*].baz') }
 * def res = fun()
 * match res == [1, 2, 3]
 

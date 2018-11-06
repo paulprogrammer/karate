@@ -23,31 +23,39 @@
  */
 package com.intuit.karate.ui;
 
-import java.io.File;
-import java.util.List;
-
-import com.intuit.karate.convert.KarateFeatureWriter;
-import com.intuit.karate.convert.PostmanCollectionReader;
+import com.intuit.karate.FileUtils;
+import com.intuit.karate.ScriptBindings;
+import com.intuit.karate.convert.ConvertUtils;
 import com.intuit.karate.convert.PostmanRequest;
 import javafx.application.Application;
+import javafx.geometry.Insets;
 import javafx.scene.Scene;
+import javafx.scene.control.Alert;
 import javafx.scene.layout.BorderPane;
 import javafx.scene.text.Font;
+import javafx.stage.DirectoryChooser;
 import javafx.stage.FileChooser;
 import javafx.stage.Stage;
+
+import java.io.File;
+import java.util.List;
 
 /**
  *
  * @author pthomas3
  */
 public class App extends Application {
-    
-    public static final Font DEFAULT_FONT = Font.font("Courier");
-    
+    public static final double PADDING = 3.0;
+    public static final Insets PADDING_INSET = new Insets(App.PADDING, App.PADDING, App.PADDING, App.PADDING);
+
     private final FileChooser fileChooser = new FileChooser();
     
     private File workingDir = new File(".");
     private final BorderPane rootPane = new BorderPane();
+    
+    public static Font getDefaultFont() {
+    	return Font.font("Courier");
+    }
     
     private File chooseFile(Stage stage, String description, String extension) {
         fileChooser.setTitle("Choose Feature File");
@@ -57,29 +65,59 @@ public class App extends Application {
         return fileChooser.showOpenDialog(stage);
     }
 
-    private void initUi(File file, String envString, Stage stage) {
+    void initUi(File file, String envString, Stage stage) {
         AppSession session = new AppSession(file, envString);
         rootPane.setTop(session.headerPanel);
         rootPane.setCenter(session.featurePanel);
         rootPane.setRight(session.varsPanel);
         rootPane.setBottom(session.logPanel);
         initFileOpenAction(session.headerPanel, envString, stage);
+        initDirectoryOpenAction(session.headerPanel, envString, stage);
         initImportOpenAction(session.headerPanel, envString, stage);
         workingDir = file.getParentFile();        
     }
     
     private void initFileOpenAction(HeaderPanel header, String envString, Stage stage) {
         header.setFileOpenAction(e -> {
+            if(rootPane.getLeft() != null) {
+                rootPane.setLeft(null);
+            }
             File file = chooseFile(stage, "*.feature files", "*.feature");
             initUi(file, envString, stage);
         });
     }
 
+    private void initDirectoryOpenAction(HeaderPanel header, String envString, Stage stage) {
+        App app = this;
+        header.setDirectoryOpenAction(e -> {
+                    DirectoryChooser directoryChooser = new DirectoryChooser();
+                    directoryChooser.setInitialDirectory(new File(System.getProperty("user.home")));
+                    File choice = directoryChooser.showDialog(stage);
+                    if (choice != null) {
+                        if (!choice.isDirectory()) {
+                            Alert alert = new Alert(Alert.AlertType.ERROR);
+                            alert.setHeaderText("Could not open directory");
+                            alert.setContentText("The directory is invalid.");
+                            alert.showAndWait();
+                        } else {
+                            final DirectoryPanel directoryPanel = new DirectoryPanel(app, envString, stage);
+                            directoryPanel.init(choice);
+                            rootPane.setLeft(directoryPanel);
+                        }
+                    }
+                }
+        );
+    }
+
     private void initImportOpenAction(HeaderPanel header, String envString, Stage stage) {
         header.setImportOpenAction(e -> {
             File file = chooseFile(stage, "*.postman_collection files", "*.postman_collection");
-            List<PostmanRequest> requests = PostmanCollectionReader.parse(file.getPath());
-            File featureFile = KarateFeatureWriter.write(requests, file.getPath());
+            String json = FileUtils.toString(file);
+            List<PostmanRequest> requests = ConvertUtils.readPostmanJson(json);
+            String featureText = ConvertUtils.toKarateFeature(requests);
+            String featurePath = FileUtils.replaceFileExtension(file.getPath(), "feature");
+            File featureFile = new File(featurePath);
+            FileUtils.writeToFile(featureFile, featureText);
             initUi(featureFile, envString, stage);
         });
     }
@@ -87,7 +125,7 @@ public class App extends Application {
     @Override
     public void start(Stage stage) throws Exception {        
         List<String> params = getParameters().getUnnamed();
-        String envString = System.getProperty("karate.env");
+        String envString = System.getProperty(ScriptBindings.KARATE_ENV);
         if (!params.isEmpty()) {
             String fileName = params.get(0);
             if (params.size() > 1) {
@@ -98,11 +136,14 @@ public class App extends Application {
             HeaderPanel header = new HeaderPanel();
             rootPane.setTop(header);
             initFileOpenAction(header, envString, stage);
+            initDirectoryOpenAction(header, envString, stage);
             initImportOpenAction(header, envString, stage);
         }
-        Scene scene = new Scene(rootPane, 900, 750);                
+
+        Scene scene = new Scene(rootPane, 900, 750);
         stage.setScene(scene);
         stage.setTitle("Karate UI");
+        stage.setMaximized(true);
         stage.show();
     }
 

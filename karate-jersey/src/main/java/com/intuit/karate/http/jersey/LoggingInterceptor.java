@@ -23,43 +23,39 @@
  */
 package com.intuit.karate.http.jersey;
 
+import com.intuit.karate.FileUtils;
+import com.intuit.karate.ScriptContext;
+import com.intuit.karate.http.HttpRequest;
 import com.intuit.karate.http.HttpUtils;
 import com.intuit.karate.http.LoggingFilterOutputStream;
 import java.io.BufferedInputStream;
 import java.io.IOException;
 import java.io.InputStream;
-import java.nio.charset.Charset;
 import java.util.List;
 import java.util.Set;
 import java.util.TreeSet;
 import java.util.concurrent.atomic.AtomicInteger;
-import javax.ws.rs.WebApplicationException;
 import javax.ws.rs.client.ClientRequestContext;
 import javax.ws.rs.client.ClientRequestFilter;
 import javax.ws.rs.client.ClientResponseContext;
 import javax.ws.rs.client.ClientResponseFilter;
 import javax.ws.rs.core.MediaType;
 import javax.ws.rs.core.MultivaluedMap;
-import javax.ws.rs.ext.WriterInterceptor;
-import javax.ws.rs.ext.WriterInterceptorContext;
-import org.apache.commons.io.IOUtils;
-import org.slf4j.Logger;
 
 /**
  *
  * @author pthomas3
  */
-public class LoggingInterceptor implements ClientRequestFilter, ClientResponseFilter, WriterInterceptor {
+public class LoggingInterceptor implements ClientRequestFilter, ClientResponseFilter {
 
-    private final Logger logger;
-    
-    public LoggingInterceptor(Logger logger) {
-        this.logger = logger;
+    private final ScriptContext context;
+
+    public LoggingInterceptor(ScriptContext context) {
+        this.context = context;
     }
-    
-    private static final Charset UTF8 = Charset.forName("UTF-8");    
 
     private final AtomicInteger counter = new AtomicInteger();
+    private long startTime;
 
     private static boolean isPrintable(MediaType mediaType) {
         if (mediaType == null) {
@@ -68,66 +64,75 @@ public class LoggingInterceptor implements ClientRequestFilter, ClientResponseFi
         return HttpUtils.isPrintable(mediaType.toString());
     }
 
-    private static void logHeaders(StringBuilder sb, int id, char prefix, MultivaluedMap<String, String> headers) {
+    private static void logHeaders(StringBuilder sb, int id, char prefix, MultivaluedMap<String, String> headers, HttpRequest actual) {
         Set<String> keys = new TreeSet(headers.keySet());
         for (String key : keys) {
             List<String> entries = headers.get(key);
             sb.append(id).append(' ').append(prefix).append(' ')
                     .append(key).append(": ").append(entries.size() == 1 ? entries.get(0) : entries).append('\n');
+            if (actual != null) {
+                actual.putHeader(key, entries);
+            }
         }
     }
 
     @Override
     public void filter(ClientRequestContext request) throws IOException {
-        if (!logger.isDebugEnabled()) {
-            return;
-        }        
-        int id = counter.incrementAndGet();
-        StringBuilder sb = new StringBuilder();
-        sb.append('\n').append(id).append(" > ").append(request.getMethod()).append(' ')
-                .append(request.getUri().toASCIIString()).append('\n');
-        logHeaders(sb, id, '>', request.getStringHeaders());
         if (request.hasEntity() && isPrintable(request.getMediaType())) {
-            LoggingFilterOutputStream out = new LoggingFilterOutputStream(request.getEntityStream(), sb);
+            LoggingFilterOutputStream out = new LoggingFilterOutputStream(request.getEntityStream());
             request.setEntityStream(out);
             request.setProperty(LoggingFilterOutputStream.KEY, out);
-        } else {
-            logger.debug(sb.toString());
         }
+        startTime = System.currentTimeMillis();
     }
 
     @Override
     public void filter(ClientRequestContext request, ClientResponseContext response) throws IOException {
-        if (!logger.isDebugEnabled()) {
-            return;
-        }        
-        int id = counter.get();
+        long endTime = System.currentTimeMillis();
+        long responseTime = endTime - startTime;
+        HttpRequest actual = new HttpRequest();
+        context.setPrevRequest(actual);
+        actual.setStartTime(startTime);
+        actual.setEndTime(endTime);        
+        int id = counter.incrementAndGet();
+        String method = request.getMethod();
+        String uri = request.getUri().toASCIIString();
+        actual.setMethod(method);
+        actual.setUri(uri);
         StringBuilder sb = new StringBuilder();
-        sb.append('\n').append(id).append(" < ").append(response.getStatus()).append('\n');
-        logHeaders(sb, id, '<', response.getHeaders());
+        sb.append("request\n").append(id).append(" > ").append(method).append(' ').append(uri).append('\n');
+        logHeaders(sb, id, '>', request.getStringHeaders(), actual);
+        LoggingFilterOutputStream out = (LoggingFilterOutputStream) request.getProperty(LoggingFilterOutputStream.KEY);
+        if (out != null) {
+            byte[] bytes = out.getBytes().toByteArray();
+            actual.setBody(bytes);            
+            String buffer = FileUtils.toString(bytes);
+            if (context.getConfig().isLogPrettyRequest()) {
+                buffer = FileUtils.toPrettyString(buffer);
+            }
+            sb.append(buffer).append('\n');
+        }        
+        context.logger.debug(sb.toString()); // log request
+        // response
+        sb = new StringBuilder();
+        sb.append("response time in milliseconds: ").append(responseTime).append('\n');
+        sb.append(id).append(" < ").append(response.getStatus()).append('\n');
+        logHeaders(sb, id, '<', response.getHeaders(), null);
         if (response.hasEntity() && isPrintable(response.getMediaType())) {
             InputStream is = response.getEntityStream();
             if (!is.markSupported()) {
                 is = new BufferedInputStream(is);
             }
             is.mark(Integer.MAX_VALUE);
-            String buffer = IOUtils.toString(is, UTF8);
+            String buffer = FileUtils.toString(is);
+            if (context.getConfig().isLogPrettyResponse()) {
+                buffer = FileUtils.toPrettyString(buffer);
+            }            
             sb.append(buffer).append('\n');
             is.reset();
             response.setEntityStream(is); // in case it was swapped
         }
-        logger.debug(sb.toString());
-    }
-
-    @Override
-    public void aroundWriteTo(WriterInterceptorContext context) throws IOException, WebApplicationException {
-        LoggingFilterOutputStream out = (LoggingFilterOutputStream) context.getProperty(LoggingFilterOutputStream.KEY);
-        context.proceed();
-        if (out != null && logger.isDebugEnabled()) {
-            StringBuilder sb = out.getBuffer();
-            sb.append(new String(out.getBytes().toByteArray(), UTF8)).append('\n');
-            logger.debug(sb.toString());
-        }
+        context.logger.debug(sb.toString());
     }
 
 }

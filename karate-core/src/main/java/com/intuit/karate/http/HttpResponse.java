@@ -37,16 +37,26 @@ public class HttpResponse {
     private Map<String, Cookie> cookies;
     private MultiValuedMap headers;
     private byte[] body;
-    private int status;
-    private final long time;
+    private int status;   
+    private final long startTime;
+    private final long endTime;
     
     // make sure client implementations don't forget to set response time
-    public HttpResponse(long time) {
-        this.time = time;
+    public HttpResponse(long startTime, long endTime) {
+        this.startTime = startTime;
+        this.endTime = endTime;
     }    
-    
-    public long getTime() {
-        return time;
+
+    public long getStartTime() {
+        return startTime;
+    }
+
+    public long getEndTime() {
+        return endTime;
+    }
+   
+    public long getResponseTime() {
+        return endTime - startTime;
     }    
 
     public void setUri(String uri) {
@@ -99,7 +109,7 @@ public class HttpResponse {
         headers.add(name, value);
     }    
     
-    public void addHeader(String name, List values) {
+    public void putHeader(String name, List values) {
         if (headers == null) {
             headers = new MultiValuedMap();
         }

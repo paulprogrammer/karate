@@ -23,153 +23,29 @@
  */
 package com.intuit.karate.cucumber;
 
-import cucumber.runtime.formatter.CucumberJSONFormatter;
+import com.intuit.karate.CallContext;
+import com.intuit.karate.Logger;
+import com.intuit.karate.ScriptContext;
 import gherkin.formatter.Formatter;
 import gherkin.formatter.Reporter;
-import gherkin.formatter.model.Background;
-import gherkin.formatter.model.Examples;
-import gherkin.formatter.model.Feature;
 import gherkin.formatter.model.Match;
 import gherkin.formatter.model.Result;
-import gherkin.formatter.model.Scenario;
-import gherkin.formatter.model.ScenarioOutline;
 import gherkin.formatter.model.Step;
-import java.io.FileWriter;
-import java.io.IOException;
-import java.util.List;
 
 /**
  *
  * @author pthomas3
  */
-public class KarateReporter implements Formatter, Reporter {
+public interface KarateReporter extends Formatter, Reporter {
     
-    private final KarateJunitFormatter junit;
-    private final CucumberJSONFormatter json;
+    public void callBegin(FeatureWrapper feature, CallContext callContext);
     
-    public KarateJunitFormatter getJunitFormatter() {
-        return junit;
-    }
+    public void exampleBegin(ScenarioWrapper feature, CallContext callContext);
     
-    public KarateReporter(String featurePath, String reportPath) throws IOException {
-        junit = new KarateJunitFormatter(featurePath, reportPath);
-        String jsonReportPath = reportPath.replaceFirst("\\.xml$", ".json");
-        FileWriter fileWriter = new FileWriter(jsonReportPath);
-        json = new CucumberJSONFormatter(fileWriter);
-    }
-
-    @Override
-    public void syntaxError(String state, String event, List<String> legalEvents, String uri, Integer line) {
-        junit.syntaxError(state, event, legalEvents, uri, line);
-        json.syntaxError(state, event, legalEvents, uri, line);
-    }
-
-    @Override
-    public void uri(String uri) {
-        junit.uri(uri);
-        json.uri(uri);
-    }
-
-    @Override
-    public void feature(Feature feature) {
-        junit.feature(feature);
-        json.feature(feature);
-    }
-
-    @Override
-    public void scenarioOutline(ScenarioOutline scenarioOutline) {
-        junit.scenarioOutline(scenarioOutline);
-        json.scenarioOutline(scenarioOutline);
-    }
-
-    @Override
-    public void examples(Examples examples) {
-        junit.examples(examples);
-        json.examples(examples);
-    }
-
-    @Override
-    public void startOfScenarioLifeCycle(Scenario scenario) {
-        junit.startOfScenarioLifeCycle(scenario);
-        json.startOfScenarioLifeCycle(scenario);
-    }
-
-    @Override
-    public void background(Background background) {
-        junit.background(background);
-        json.background(background);
-    }
-
-    @Override
-    public void scenario(Scenario scenario) {
-        junit.scenario(scenario);
-        json.scenario(scenario);
-    }
-
-    @Override
-    public void step(Step step) {
-        junit.step(step);
-        json.step(step);
-    }
-
-    @Override
-    public void endOfScenarioLifeCycle(Scenario scenario) {
-        junit.endOfScenarioLifeCycle(scenario);
-        json.endOfScenarioLifeCycle(scenario);
-    }
-
-    @Override
-    public void done() {
-        junit.done();
-        json.done();
-    }
-
-    @Override
-    public void close() {
-        junit.close();
-        json.close();
-    }
-
-    @Override
-    public void eof() {
-        junit.eof();
-        json.eof();
-    }
-
-    @Override
-    public void before(Match match, Result result) {
-        junit.before(match, result);
-        json.before(match, result);
-    }
-
-    @Override
-    public void result(Result result) {
-        junit.result(result);
-        json.result(result);
-    }
-
-    @Override
-    public void after(Match match, Result result) {
-        junit.after(match, result);
-        json.after(match, result);
-    }
-
-    @Override
-    public void match(Match match) {
-        junit.match(match);
-        json.match(match);
-    }
-
-    @Override
-    public void embedding(String mimeType, byte[] data) {
-        junit.embedding(mimeType, data);
-        json.embedding(mimeType, data);
-    }
-
-    @Override
-    public void write(String text) {
-        junit.write(text);
-        json.write(text);
-    }
+    public void karateStep(Step step, Match match, Result result, CallContext call, ScriptContext context);
+    
+    public void karateStepProceed(Step step, Match match, Result result, CallContext call);
+    
+    public void setLogger(Logger logger);
     
 }

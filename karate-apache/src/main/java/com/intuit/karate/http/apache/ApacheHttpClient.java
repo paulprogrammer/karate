@@ -23,23 +23,36 @@
  */
 package com.intuit.karate.http.apache;
 
+import com.intuit.karate.FileUtils;
 import com.intuit.karate.ScriptContext;
 import org.apache.http.conn.ssl.LenientSslConnectionSocketFactory;
+
 import static com.intuit.karate.http.Cookie.*;
+
 import com.intuit.karate.http.HttpClient;
 import com.intuit.karate.http.HttpConfig;
+import com.intuit.karate.http.HttpRequest;
 import com.intuit.karate.http.HttpResponse;
 import com.intuit.karate.http.HttpUtils;
 import com.intuit.karate.http.MultiPartItem;
 import com.intuit.karate.http.MultiValuedMap;
+import java.io.IOException;
+
 import java.io.InputStream;
+import java.net.InetSocketAddress;
+import java.net.Proxy;
+import java.net.ProxySelector;
+import java.net.SocketAddress;
 import java.net.URI;
+import java.nio.charset.Charset;
+import java.security.KeyStore;
+import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map.Entry;
-import java.util.concurrent.atomic.AtomicInteger;
+import java.util.Objects;
 import javax.net.ssl.SSLContext;
-import org.apache.commons.io.IOUtils;
-import org.apache.commons.lang3.StringUtils;
+
 import org.apache.http.Header;
 import org.apache.http.HttpEntity;
 import org.apache.http.HttpHost;
@@ -54,19 +67,21 @@ import org.apache.http.client.methods.RequestBuilder;
 import org.apache.http.client.utils.URIBuilder;
 import org.apache.http.conn.ssl.NoopHostnameVerifier;
 import org.apache.http.conn.ssl.SSLConnectionSocketFactory;
+import org.apache.http.conn.ssl.TrustAllStrategy;
+import org.apache.http.conn.ssl.TrustSelfSignedStrategy;
 import org.apache.http.cookie.Cookie;
-import org.apache.http.entity.ContentType;
-import org.apache.http.entity.InputStreamEntity;
-import org.apache.http.entity.StringEntity;
 import org.apache.http.impl.client.BasicCookieStore;
 import org.apache.http.impl.client.BasicCredentialsProvider;
 import org.apache.http.impl.client.CloseableHttpClient;
 import org.apache.http.impl.client.HttpClientBuilder;
+import org.apache.http.impl.client.LaxRedirectStrategy;
+import org.apache.http.impl.conn.SystemDefaultRoutePlanner;
 import org.apache.http.impl.cookie.BasicClientCookie;
 import org.apache.http.protocol.BasicHttpContext;
+import org.apache.http.ssl.SSLContextBuilder;
+import org.apache.http.ssl.SSLContexts;
 
 /**
- *
  * @author pthomas3
  */
 public class ApacheHttpClient extends HttpClient<HttpEntity> {
@@ -77,6 +92,7 @@ public class ApacheHttpClient extends HttpClient<HttpEntity> {
     private URIBuilder uriBuilder;
     private RequestBuilder requestBuilder;
     private CookieStore cookieStore;
+    private Charset charset;
 
     private void build() {
         try {
@@ -91,17 +107,48 @@ public class ApacheHttpClient extends HttpClient<HttpEntity> {
     @Override
     public void configure(HttpConfig config, ScriptContext context) {
         clientBuilder = HttpClientBuilder.create();
+        charset = config.getCharset();
+        if (!config.isFollowRedirects()) {
+            clientBuilder.disableRedirectHandling();
+        } else { // support redirect on POST by default
+            clientBuilder.setRedirectStrategy(new LaxRedirectStrategy());
+        }
         clientBuilder.useSystemProperties();
         cookieStore = new BasicCookieStore();
         clientBuilder.setDefaultCookieStore(cookieStore);
         clientBuilder.setDefaultCookieSpecRegistry(LenientCookieSpec.registry());
-        AtomicInteger counter = new AtomicInteger();
-        clientBuilder.addInterceptorLast(new RequestLoggingInterceptor(counter, context.logger));
-        clientBuilder.addInterceptorLast(new ResponseLoggingInterceptor(counter, context.logger));
+        RequestLoggingInterceptor requestInterceptor = new RequestLoggingInterceptor(context);
+        clientBuilder.addInterceptorLast(requestInterceptor);
+        clientBuilder.addInterceptorLast(new ResponseLoggingInterceptor(requestInterceptor, context));
         if (config.isSslEnabled()) {
             // System.setProperty("jsse.enableSNIExtension", "false");
-            String sslAlgorithm = config.getSslAlgorithm();
-            SSLContext sslContext = HttpUtils.getSslContext(sslAlgorithm);
+            String algorithm = config.getSslAlgorithm(); // could be null
+            KeyStore trustStore = HttpUtils.getKeyStore(context,
+                    config.getSslTrustStore(), config.getSslTrustStorePassword(), config.getSslTrustStoreType());
+            KeyStore keyStore = HttpUtils.getKeyStore(context,
+                    config.getSslKeyStore(), config.getSslKeyStorePassword(), config.getSslKeyStoreType());
+            SSLContext sslContext;
+            try {
+                SSLContextBuilder builder = SSLContexts.custom()
+                        .setProtocol(algorithm); // will default to TLS if null
+                if (trustStore == null && config.isSslTrustAll()) {
+                    builder = builder.loadTrustMaterial(new TrustAllStrategy());
+                } else {
+                    if (config.isSslTrustAll()) {
+                        builder = builder.loadTrustMaterial(trustStore, new TrustSelfSignedStrategy());
+                    } else {
+                        builder = builder.loadTrustMaterial(trustStore, null); // will use system / java default
+                    }
+                }
+                if (keyStore != null) {
+                    char[] keyPassword = config.getSslKeyStorePassword() == null ? null : config.getSslKeyStorePassword().toCharArray();
+                    builder = builder.loadKeyMaterial(keyStore, keyPassword);
+                }
+                sslContext = builder.build();
+            } catch (Exception e) {
+                context.logger.error("ssl context init failed: {}", e.getMessage());
+                throw new RuntimeException(e);
+            }
             SSLConnectionSocketFactory socketFactory = new LenientSslConnectionSocketFactory(sslContext, new NoopHostnameVerifier());
             clientBuilder.setSSLSocketFactory(socketFactory);
         }
@@ -120,7 +167,22 @@ public class ApacheHttpClient extends HttpClient<HttpEntity> {
                             new AuthScope(proxyUri.getHost(), proxyUri.getPort()),
                             new UsernamePasswordCredentials(config.getProxyUsername(), config.getProxyPassword()));
                     clientBuilder.setDefaultCredentialsProvider(credsProvider);
-
+                }
+                if (config.getNonProxyHosts() != null) {
+                    ProxySelector proxySelector = new ProxySelector() {
+                        private final List<String> proxyExceptions = config.getNonProxyHosts();
+                        @Override
+                        public List<Proxy> select(URI uri) {
+                            return Collections.singletonList(proxyExceptions.contains(uri.getHost()) 
+                                    ? Proxy.NO_PROXY 
+                                    : new Proxy(Proxy.Type.HTTP, new InetSocketAddress(proxyUri.getHost(), proxyUri.getPort())));
+                        }
+                        @Override
+                        public void connectFailed(URI uri, SocketAddress sa, IOException ioe) {
+                            context.logger.info("connect failed to uri: {}", uri, ioe);
+                        }
+                    };
+                    clientBuilder.setRoutePlanner(new SystemDefaultRoutePlanner(proxySelector));
                 }
             } catch (Exception e) {
                 throw new RuntimeException(e);
@@ -157,10 +219,11 @@ public class ApacheHttpClient extends HttpClient<HttpEntity> {
             Object v = values[0];
             if (v != null) {
                 uriBuilder.setParameter(name, v.toString());
-            }            
+            }
         } else {
-            String v = StringUtils.join(values, ',');
-            uriBuilder.setParameter(name, v);
+            Arrays.stream(values)
+                    .filter(Objects::nonNull)
+                    .forEach(o -> uriBuilder.addParameter(name, o.toString()));
         }
         build();
     }
@@ -194,50 +257,50 @@ public class ApacheHttpClient extends HttpClient<HttpEntity> {
 
     @Override
     protected HttpEntity getEntity(List<MultiPartItem> items, String mediaType) {
-        return ApacheHttpUtils.getEntity(items, mediaType);
+        return ApacheHttpUtils.getEntity(items, mediaType, charset);
     }
 
     @Override
     protected HttpEntity getEntity(MultiValuedMap fields, String mediaType) {
-        return ApacheHttpUtils.getEntity(fields, mediaType);
+        return ApacheHttpUtils.getEntity(fields, mediaType, charset);
     }
 
     @Override
     protected HttpEntity getEntity(String value, String mediaType) {
-        return new StringEntity(value, ContentType.create(mediaType));
+        return ApacheHttpUtils.getEntity(value, mediaType, charset);
     }
 
     @Override
     protected HttpEntity getEntity(InputStream value, String mediaType) {
-        return new InputStreamEntity(value, ContentType.create(mediaType));
+        return ApacheHttpUtils.getEntity(value, mediaType, charset);
     }
 
     @Override
-    protected HttpResponse makeHttpRequest(HttpEntity entity, long startTime) {
+    protected HttpResponse makeHttpRequest(HttpEntity entity, ScriptContext context) {
         if (entity != null) {
             requestBuilder.setEntity(entity);
             requestBuilder.setHeader(entity.getContentType());
         }
         HttpUriRequest httpRequest = requestBuilder.build();
         CloseableHttpClient client = clientBuilder.build();
-        BasicHttpContext context = new BasicHttpContext();
-        context.setAttribute(URI_CONTEXT_KEY, getRequestUri());
+        BasicHttpContext httpContext = new BasicHttpContext();
+        httpContext.setAttribute(URI_CONTEXT_KEY, getRequestUri());
         CloseableHttpResponse httpResponse;
         byte[] bytes;
         try {
-            httpResponse = client.execute(httpRequest, context);
+            httpResponse = client.execute(httpRequest, httpContext);
             HttpEntity responseEntity = httpResponse.getEntity();
             if (responseEntity == null || responseEntity.getContent() == null) {
                 bytes = new byte[0];
             } else {
                 InputStream is = responseEntity.getContent();
-                bytes = IOUtils.toByteArray(is);
+                bytes = FileUtils.toBytes(is);
             }
         } catch (Exception e) {
             throw new RuntimeException(e);
         }
-        long responseTime = getResponseTime(startTime);
-        HttpResponse response = new HttpResponse(responseTime);
+        HttpRequest actualRequest = context.getPrevRequest();
+        HttpResponse response = new HttpResponse(actualRequest.getStartTime(), actualRequest.getEndTime());
         response.setUri(getRequestUri());
         response.setBody(bytes);
         response.setStatus(httpResponse.getStatusLine().getStatusCode());

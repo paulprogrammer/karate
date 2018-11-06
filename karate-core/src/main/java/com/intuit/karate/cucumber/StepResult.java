@@ -23,30 +23,49 @@
  */
 package com.intuit.karate.cucumber;
 
+import gherkin.formatter.model.Result;
+import gherkin.formatter.model.Step;
+
 /**
  *
  * @author pthomas3
  */
 public class StepResult {
     
-    private final StepWrapper step;
-    private final Throwable error;
+    public static final String ABORTED = "aborted";
+    public static final Result PASSED = new Result(Result.PASSED, null, null);
+    public static final Object DUMMY_OBJECT = new Object();
+    
+    private final Step step;
+    private final Result result;
+    private final boolean pass;
+    private final boolean abort;
 
-    public StepResult(StepWrapper step, Throwable error) {
+    public StepResult(Step step, Result result) {
         this.step = step;
-        this.error = error;
+        this.result = result;
+        pass = result.getError() == null;
+        abort = result.getStatus().equals(ABORTED);
     }
 
-    public StepWrapper getStep() {
+    public Step getStep() {
         return step;
     }
 
+    public Result getResult() {
+        return result;
+    }        
+
     public Throwable getError() {
-        return error;
+        return result.getError();
     }    
 
     public boolean isPass() {
-        return error == null;
+        return pass;
+    }    
+
+    public boolean isAbort() {
+        return abort;
     }
-    
+        
 }

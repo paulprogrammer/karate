@@ -25,11 +25,14 @@ package com.intuit.karate.demo.controller;
 
 import com.intuit.karate.demo.domain.Cat;
 import java.util.Collection;
+import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
@@ -43,7 +46,7 @@ import org.springframework.web.bind.annotation.RestController;
 public class CatsController {
     
     private final AtomicInteger counter = new AtomicInteger();
-    private final ConcurrentHashMap<Integer, Cat> cats = new ConcurrentHashMap<>();
+    private final Map<Integer, Cat> cats = new ConcurrentHashMap<>();
     
     @PostMapping
     public Cat create(@RequestBody Cat cat) {
@@ -66,6 +69,26 @@ public class CatsController {
     @GetMapping("/{id:.+}/kittens")
     public Collection<Cat> getKittens(@PathVariable int id) {
         return cats.get(id).getKittens();
+    } 
+    
+    @PutMapping("/{id:.+}")
+    public Cat put(@PathVariable int id, @RequestBody Cat cat) {
+        cats.put(id, cat);
+        return cat;        
+    }    
+    
+    @DeleteMapping("/{id:.+}")
+    public void delete(@PathVariable int id) {        
+        Cat cat = cats.remove(id);
+        if (cat == null) {
+            throw new RuntimeException("cat not found, id: " + id);
+        }
+    }
+
+    @DeleteMapping
+    public void deleteWithBody(@RequestBody Cat cat) {
+        int id = cat.getId();
+        delete(id);
     }    
     
 }

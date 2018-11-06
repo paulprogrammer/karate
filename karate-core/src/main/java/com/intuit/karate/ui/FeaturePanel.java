@@ -24,32 +24,52 @@
 package com.intuit.karate.ui;
 
 import com.intuit.karate.cucumber.FeatureSection;
+import gherkin.formatter.model.Feature;
+import javafx.scene.control.ScrollPane;
+import javafx.scene.layout.BorderPane;
+import javafx.scene.layout.VBox;
+import javafx.scene.text.Text;
+import javafx.scene.text.TextFlow;
+
 import java.util.ArrayList;
 import java.util.List;
-import javafx.scene.control.ScrollPane;
-import javafx.scene.layout.VBox;
+
+import static com.intuit.karate.ui.App.PADDING_INSET;
 
 /**
  *
  * @author pthomas3
  */
-public class FeaturePanel extends ScrollPane {
+public class FeaturePanel extends BorderPane {
 
+    private final ScrollPane scrollPane;
     private final VBox content;
     private final AppSession session;
     private final List<SectionPanel> sectionPanels;
 
     public FeaturePanel(AppSession session) {
-        content = new VBox(0);
-        setContent(content);
-        setFitToWidth(true);
+        this.setPadding(PADDING_INSET);
+        this.scrollPane = new ScrollPane();
+        content = new VBox(5.0);
+        this.scrollPane.setContent(content);
+        this.scrollPane.setFitToWidth(true);
         this.session = session;
         int sectionCount = session.getFeature().getSections().size();
         sectionPanels = new ArrayList(sectionCount);
         addSections();
+        this.setCenter(scrollPane);
     }
     
     private void addSections() {
+        final Feature gherkinFeature = session.getFeature().getFeature().getGherkinFeature();
+
+        TextFlow flow = new TextFlow();
+        Text keyword=new Text(gherkinFeature.getKeyword()+" : ");
+        Text name=new Text(gherkinFeature.getName());
+        flow.getChildren().addAll(keyword, name);
+
+        flow.setMaxHeight(8);
+        content.getChildren().add(flow);
         for (FeatureSection section : session.getFeature().getSections()) {
             SectionPanel sectionPanel = new SectionPanel(session, section);            
             content.getChildren().add(sectionPanel);

@@ -37,11 +37,9 @@ public class LoggingFilterOutputStream extends FilterOutputStream {
     public static final String KEY = LoggingFilterOutputStream.class.getName();
 
     private final ByteArrayOutputStream bytes = new ByteArrayOutputStream();
-    private final StringBuilder buffer;
 
-    public LoggingFilterOutputStream(OutputStream out, StringBuilder sb) {
+    public LoggingFilterOutputStream(OutputStream out) {
         super(out);
-        this.buffer = sb;
     }
 
     @Override
@@ -50,12 +48,8 @@ public class LoggingFilterOutputStream extends FilterOutputStream {
         bytes.write(b);
     }
 
-    public StringBuilder getBuffer() {
-        return buffer;
-    }
-
     public ByteArrayOutputStream getBytes() {
         return bytes;
-    }        
-
+    }
+    
 }

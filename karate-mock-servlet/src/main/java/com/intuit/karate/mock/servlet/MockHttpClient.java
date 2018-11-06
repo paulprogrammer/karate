@@ -23,6 +23,7 @@
  */
 package com.intuit.karate.mock.servlet;
 
+import com.intuit.karate.FileUtils;
 import com.intuit.karate.ScriptContext;
 import static com.intuit.karate.http.Cookie.DOMAIN;
 import static com.intuit.karate.http.Cookie.MAX_AGE;
@@ -33,6 +34,7 @@ import com.intuit.karate.http.HttpBody;
 import com.intuit.karate.http.HttpClient;
 import com.intuit.karate.http.HttpConfig;
 import com.intuit.karate.http.HttpRequest;
+import com.intuit.karate.http.HttpRequestBuilder;
 import com.intuit.karate.http.HttpResponse;
 import com.intuit.karate.http.HttpUtils;
 import com.intuit.karate.http.MultiPartItem;
@@ -66,15 +68,16 @@ public abstract class MockHttpClient extends HttpClient<HttpBody> {
 
     private URI uri;
     private MockHttpServletRequestBuilder requestBuilder;
-    
-    protected abstract Servlet getServlet(HttpRequest request);
 
-    protected abstract ServletContext getServletContext();     
-    
+    protected abstract Servlet getServlet(HttpRequestBuilder request);
+
+    protected abstract ServletContext getServletContext();
+
     /**
-     * this is guaranteed to be called if the zero-arg constructor is used,
-     * so for advanced per-test set-up, over-ride this call-back and retrieve custom data 
-     * via config.getUserDefined() - refer to the documentation of the 'configure userDefined' keyword
+     * this is guaranteed to be called if the zero-arg constructor is used, so
+     * for advanced per-test set-up, over-ride this call-back and retrieve
+     * custom data via config.getUserDefined() - refer to the documentation of
+     * the 'configure userDefined' keyword
      */
     @Override
     public void configure(HttpConfig config, ScriptContext context) {
@@ -88,7 +91,7 @@ public abstract class MockHttpClient extends HttpClient<HttpBody> {
 
     @Override
     protected HttpBody getEntity(MultiValuedMap formFields, String mediaType) {
-        return HttpBody.formFields(formFields, mediaType);      
+        return HttpBody.formFields(formFields, mediaType);
     }
 
     @Override
@@ -160,12 +163,12 @@ public abstract class MockHttpClient extends HttpClient<HttpBody> {
     }
 
     @Override
-    protected HttpResponse makeHttpRequest(HttpBody entity, long startTime) {
+    protected HttpResponse makeHttpRequest(HttpBody entity, ScriptContext context) {
         logger.info("making mock http client request: {} - {}", request.getMethod(), getRequestUri());
         MockHttpServletRequest req = requestBuilder.buildRequest(getServletContext());
         byte[] bytes;
         if (entity != null) {
-            bytes = entity.getBytes();            
+            bytes = entity.getBytes();
             req.setContentType(entity.getContentType());
             if (entity.isMultiPart()) {
                 for (MultiPartItem item : entity.getParts()) {
@@ -182,19 +185,19 @@ public abstract class MockHttpClient extends HttpClient<HttpBody> {
             }
         } else {
             bytes = null;
-        }       
+        }
         MockHttpServletResponse res = new MockHttpServletResponse();
         logRequest(req, bytes);
+        long startTime = System.currentTimeMillis();
         try {
             getServlet(request).service(req, res);
         } catch (Exception e) {
             throw new RuntimeException(e);
         }
-        long responseTime = getResponseTime(startTime);
+        HttpResponse response = new HttpResponse(startTime, System.currentTimeMillis());
         bytes = res.getContentAsByteArray();
-        logResponse(res, bytes);
-        HttpResponse response = new HttpResponse(responseTime);
-        response.setUri(getRequestUri());        
+        logResponse(res, bytes);        
+        response.setUri(getRequestUri());
         response.setBody(bytes);
         response.setStatus(res.getStatus());
         for (Cookie c : res.getCookies()) {
@@ -207,7 +210,7 @@ public abstract class MockHttpClient extends HttpClient<HttpBody> {
             response.addCookie(cookie);
         }
         for (String headerName : res.getHeaderNames()) {
-            response.addHeader(headerName, res.getHeaders(headerName));
+            response.putHeader(headerName, res.getHeaders(headerName));
         }
         return response;
     }
@@ -216,9 +219,9 @@ public abstract class MockHttpClient extends HttpClient<HttpBody> {
     protected String getRequestUri() {
         return uri.toString();
     }
-    
+
     private final AtomicInteger counter = new AtomicInteger();
-    
+
     private void logRequest(MockHttpServletRequest req, byte[] bytes) {
         if (!logger.isDebugEnabled()) {
             return;
@@ -230,20 +233,20 @@ public abstract class MockHttpClient extends HttpClient<HttpBody> {
         logRequestHeaders(sb, id, req);
         logBody(sb, bytes, req.getContentType());
         logger.debug(sb.toString());
-    }    
-    
+    }
+
     private void logResponse(MockHttpServletResponse res, byte[] bytes) {
         if (!logger.isDebugEnabled()) {
             return;
-        }        
+        }
         int id = counter.get();
         StringBuilder sb = new StringBuilder();
         sb.append('\n').append(id).append(" < ").append(res.getStatus()).append('\n');
         logResponseHeaders(sb, id, res);
         logBody(sb, bytes, res.getContentType());
-        logger.debug(sb.toString());   
-    }    
-    
+        logger.debug(sb.toString());
+    }
+
     private static void logRequestHeaders(StringBuilder sb, int id, MockHttpServletRequest request) {
         Set<String> keys = new TreeSet(Collections.list(request.getHeaderNames()));
         for (String key : keys) {
@@ -261,15 +264,11 @@ public abstract class MockHttpClient extends HttpClient<HttpBody> {
                     .append(key).append(": ").append(entries.size() == 1 ? entries.get(0) : entries).append('\n');
         }
     }
-    
+
     private static void logBody(StringBuilder sb, byte[] bytes, String contentType) {
         if (bytes != null && HttpUtils.isPrintable(contentType)) {
-            try {
-                sb.append(new String(bytes, "utf-8"));
-            } catch (Exception e) {
-                throw new RuntimeException(e);
-            }
-        }          
-    }    
+            sb.append(FileUtils.toString(bytes));
+        }
+    }
 
 }

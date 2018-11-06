@@ -25,7 +25,12 @@ package com.intuit.karate.demo.controller;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.intuit.karate.demo.domain.FileInfo;
+import com.intuit.karate.demo.domain.Message;
 import java.io.File;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import org.apache.commons.io.FileUtils;
 import org.slf4j.Logger;
@@ -38,8 +43,10 @@ import org.springframework.stereotype.Controller;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.RequestPart;
 import org.springframework.web.bind.annotation.ResponseBody;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -64,17 +71,52 @@ public class UploadController {
     }
 
     @PostMapping
-    public @ResponseBody
-    FileInfo upload(@RequestParam("myFile") MultipartFile file, @RequestParam("message") String message) throws Exception {
+    public @ResponseBody FileInfo upload(@RequestParam("myFile") MultipartFile file,
+            @RequestParam("message") String message) throws Exception {
+        return getFileInfo(file, message);
+    }
+
+    @PostMapping("/multiple")
+    public @ResponseBody List<FileInfo> upload(@RequestParam("myFile1") MultipartFile file1,
+                          @RequestParam("myFile2") MultipartFile file2, @RequestParam("message") String message) throws Exception {
+        List<FileInfo> fileInfoList = new ArrayList<>();
+        fileInfoList.add(getFileInfo(file1, message));
+        fileInfoList.add(getFileInfo(file2, message));
+        return fileInfoList;
+    }
+    
+    @PostMapping("/fields")
+    public @ResponseBody Map<String, Object> fields(
+            @RequestParam("message") String message, @RequestParam("json") String json) throws Exception {
+        Map<String, Object> map = new HashMap();
+        map.put("message", message);
+        map.put("json", mapper.readValue(json, HashMap.class));
+        return map;
+    }    
+
+    private FileInfo getFileInfo(MultipartFile file, String message) throws Exception {
+
         String uuid = UUID.randomUUID().toString();
         String filePath = FILES_BASE + uuid;
+
         FileUtils.copyToFile(file.getInputStream(), new File(filePath));
-        String filename = file.getOriginalFilename();
-        String contentType = file.getContentType();
-        FileInfo fileInfo = new FileInfo(uuid, filename, message, contentType);
+        String filename1 = file.getOriginalFilename();
+        String contentType1 = file.getContentType();
+
+        FileInfo fileInfo = new FileInfo(uuid, filename1, message, contentType1);
         String json = mapper.writeValueAsString(fileInfo);
         FileUtils.writeStringToFile(new File(filePath + "_meta.txt"), json, "utf-8");
+
         return fileInfo;
+
+    }
+    
+    @PostMapping("/mixed")
+    public @ResponseBody FileInfo uploadMixed(@RequestPart("myJson") String json, 
+            @RequestPart("myFile") MultipartFile file) throws Exception {
+        Message message = mapper.readValue(json, Message.class);
+        String text = message.getText();
+        return upload(file, text);
     }
 
     @GetMapping("/{id:.+}")
@@ -90,5 +132,17 @@ public class UploadController {
                 .header(HttpHeaders.CONTENT_TYPE, fileInfo.getContentType())
                 .body(new FileSystemResource(file));
     }
+    
+    @PostMapping("/binary")
+    public @ResponseBody FileInfo uploadBinary(@RequestParam String name, @RequestBody byte[] bytes) throws Exception {
+        String uuid = UUID.randomUUID().toString();
+        String filePath = FILES_BASE + uuid;
+        File file = new File(filePath);
+        FileUtils.writeByteArrayToFile(file, bytes);
+        FileInfo fileInfo = new FileInfo(uuid, name, "hello world", "application/octet-stream");
+        String json = mapper.writeValueAsString(fileInfo);
+        FileUtils.writeStringToFile(new File(filePath + "_meta.txt"), json, "utf-8");
+        return fileInfo;
+    }    
 
 }

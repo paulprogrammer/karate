@@ -24,13 +24,17 @@
 package demo;
 
 import com.intuit.karate.demo.controller.CatsController;
+import com.intuit.karate.demo.controller.DogsController;
+import com.intuit.karate.demo.controller.EchoController;
+import com.intuit.karate.demo.controller.EncodingController;
+import com.intuit.karate.demo.controller.GraphqlController;
 import com.intuit.karate.demo.controller.GreetingController;
 import com.intuit.karate.demo.controller.HeadersController;
+import com.intuit.karate.demo.controller.RedirectController;
 import com.intuit.karate.demo.controller.SearchController;
 import com.intuit.karate.demo.controller.SignInController;
+import com.intuit.karate.demo.controller.SoapController;
 import com.intuit.karate.demo.controller.UploadController;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.boot.autoconfigure.EnableAutoConfiguration;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -45,12 +49,15 @@ import org.springframework.context.annotation.PropertySource;
 @PropertySource("classpath:application.properties")
 public class MockDemoConfig {
     
-    private static final Logger logger = LoggerFactory.getLogger(MockDemoConfig.class);
-    
     @Bean
     public CatsController catsController() {
         return new CatsController();
     }
+    
+    @Bean
+    public DogsController dogsController() {
+        return new DogsController();
+    }    
     
     @Bean
     public GreetingController greetingController() {
@@ -75,6 +82,31 @@ public class MockDemoConfig {
     @Bean
     public UploadController uploadController() throws Exception {
         return new UploadController();
-    }        
+    }
+    
+    @Bean
+    public EncodingController encodingController() {
+        return new EncodingController();
+    }
+    
+    @Bean
+    public RedirectController redirectController() {
+        return new RedirectController();
+    } 
+    
+    @Bean
+    public GraphqlController graphqlController() {
+        return new GraphqlController();
+    } 
+    
+    @Bean
+    public SoapController soapController() {
+        return new SoapController();
+    }
+    
+    @Bean
+    public EchoController echoController() {
+        return new EchoController();
+    }    
     
 }

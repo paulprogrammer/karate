@@ -23,6 +23,7 @@
  */
 package com.intuit.karate.ui;
 
+import com.intuit.karate.CallContext;
 import com.intuit.karate.FileUtils;
 import com.intuit.karate.ScriptEnv;
 import com.intuit.karate.ScriptValue;
@@ -41,7 +42,6 @@ import java.util.List;
 import java.util.Map;
 import javafx.collections.FXCollections;
 import javafx.collections.ObservableList;
-import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -94,14 +94,15 @@ public class AppSession {
     public AppSession(File featureFile, String envString, boolean test) {
         this.featureFile = featureFile;
         FeatureFilePath ffp = FileUtils.parseFeaturePath(featureFile);
-        ScriptEnv env = ScriptEnv.init(envString, ffp.file, ffp.searchPaths, logger);
+        ScriptEnv env = ScriptEnv.init(envString, ffp.file, ffp.searchPaths);
         feature = FeatureWrapper.fromFile(ffp.file, env);
-        backend = CucumberUtils.getBackendWithGlue(env, null, null, false);
+        CallContext callContext = new CallContext(null, true);
+        backend = CucumberUtils.getBackendWithGlue(feature, callContext);
         if (!test) {
             headerPanel = new HeaderPanel(this);
             featurePanel = new FeaturePanel(this);
             varsPanel = new VarsPanel(this);
-            logPanel = new LogPanel();
+            logPanel = new LogPanel(null);
         } else {
             headerPanel = null;
             featurePanel = null;
@@ -112,14 +113,7 @@ public class AppSession {
 
     public void logVar(Var var) {
         if (logPanel != null) {
-            String description = var.getName() + " (" + var.getValue().getTypeAsShortString() + "): ";
-            logPanel.append(description);
-            String value = var.getValue().getAsPrettyString();
-            if (value != null && value.indexOf('\n') != -1) {
-                String dashes = StringUtils.repeat('-', description.length() - 1);
-                logPanel.append('\n' + dashes + '\n');
-            }
-            logPanel.append(var.getValue().getAsPrettyString() + '\n');
+            logPanel.append(var.toString());
         }
     }
 

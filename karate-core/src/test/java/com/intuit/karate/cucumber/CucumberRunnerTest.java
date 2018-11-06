@@ -23,10 +23,10 @@
  */
 package com.intuit.karate.cucumber;
 
+import com.intuit.karate.FileUtils;
 import cucumber.api.CucumberOptions;
 import java.io.File;
 import java.util.Map;
-import org.apache.commons.io.FileUtils;
 import static org.junit.Assert.assertTrue;
 import org.junit.Test;
 import static org.junit.Assert.*;
@@ -43,22 +43,24 @@ public class CucumberRunnerTest {
     private static final Logger logger = LoggerFactory.getLogger(CucumberRunnerTest.class);
     
     private boolean contains(String reportPath, String textToFind) {
-        try {
-            String contents = FileUtils.readFileToString(new File(reportPath), "utf-8");
-            return contents.contains(textToFind);
-        } catch (Exception e) {
-            throw new RuntimeException(e);
-        }
+        String contents = FileUtils.toString(new File(reportPath));
+        return contents.contains(textToFind);
+    }
+    
+    public static KarateJunitAndJsonReporter run(File file, String reportPath) throws Exception {
+        KarateFeature kf = new KarateFeature(file);     
+        KarateJunitAndJsonReporter reporter = new KarateJunitAndJsonReporter(file.getPath(), reportPath);
+        KarateRuntime runtime = kf.getRuntime(reporter);
+        kf.getFeature().run(reporter, reporter, runtime);
+        reporter.done();
+        return reporter;
     }
     
     @Test 
     public void testScenario() throws Exception {
         String reportPath = "target/scenario.xml";
         File file = new File("src/test/java/com/intuit/karate/cucumber/scenario.feature");
-        CucumberRunner runner = new CucumberRunner(file);        
-        KarateReporter reporter = new KarateReporter(file.getPath(), reportPath);
-        runner.run(reporter);
-        reporter.done();
+        run(file, reportPath);
         assertTrue(contains(reportPath, "Then match b == { foo: 'bar'}"));
     }
     
@@ -66,28 +68,28 @@ public class CucumberRunnerTest {
     public void testScenarioOutline() throws Exception {
         String reportPath = "target/outline.xml";
         File file = new File("src/test/java/com/intuit/karate/cucumber/outline.feature");
-        CucumberRunner runner = new CucumberRunner(file);        
-        KarateReporter reporter = new KarateReporter(file.getPath(), reportPath);
-        runner.run(reporter);
-        reporter.done();
+        run(file, reportPath);
         assertTrue(contains(reportPath, "When def a = 55"));
     }  
     
     @Test 
     public void testParallel() {
         KarateStats stats = CucumberRunner.parallel(getClass(), 1);
-        assertEquals(1, stats.getFailCount());
+        assertEquals(2, stats.getFailCount());
         String pathBase = "target/surefire-reports/TEST-com.intuit.karate.cucumber.";
         assertTrue(contains(pathBase + "scenario.xml", "Then match b == { foo: 'bar'}"));
         assertTrue(contains(pathBase + "outline.xml", "Then assert a == 55"));
         assertTrue(contains(pathBase + "multi-scenario.xml", "Then assert a != 2"));
-        assertEquals(1, stats.getFailedList().size());
-        assertEquals("com.intuit.karate.cucumber.no-scenario-name", stats.getFailedList().get(0));
-    }
+        // a scenario failure should not stop other features from running
+        assertTrue(contains(pathBase + "multi-scenario-fail.xml", "Then assert a != 2..........................................................passed"));
+        assertEquals(2, stats.getFailedMap().size());
+        assertTrue(stats.getFailedMap().keySet().contains("com.intuit.karate.cucumber.no-scenario-name"));
+        assertTrue(stats.getFailedMap().keySet().contains("com.intuit.karate.cucumber.multi-scenario-fail"));
+    }    
     
     @Test
     public void testRunningFeatureFromJavaApi() {
-        Map<String, Object> result = CucumberRunner.runFeature(getClass(), "scenario.feature", null);
+        Map<String, Object> result = CucumberRunner.runFeature(getClass(), "scenario.feature", null, true);
         assertEquals(1, result.get("a"));
         Map<String, Object> temp = (Map) result.get("b");
         assertEquals("bar", temp.get("foo"));
@@ -96,10 +98,19 @@ public class CucumberRunnerTest {
     
     @Test
     public void testRunningRelativePathFeatureFromJavaApi() {
-        Map<String, Object> result = CucumberRunner.runClasspathFeature("com/intuit/karate/test-called.feature", null);
+        Map<String, Object> result = CucumberRunner.runClasspathFeature("com/intuit/karate/test-called.feature", null, true);
         assertEquals(1, result.get("a"));
         assertEquals(2, result.get("b"));
         assertEquals("someValue", result.get("someConfig"));
     }
+
+    @Test 
+    public void testCallerArg() throws Exception {
+        String reportPath = "target/caller-arg.xml";
+        File file = new File("src/test/java/com/intuit/karate/cucumber/caller-arg.feature");
+        run(file, reportPath);
+        assertFalse(contains(reportPath, "failed"));
+        assertTrue(contains(reportPath, "* def result = call read('called-arg-null.feature')"));
+    }    
     
 }

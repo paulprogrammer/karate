@@ -1,6 +1,8 @@
 Feature: demo of how to poll until a certain condition is met
+    using a javascript function
 
 Background:
+# you may prefer to read the javascript from a file instead of having it in-line
 * def waitUntil = 
 """
 function(x) {
@@ -24,7 +26,5 @@ Scenario: get greeting and keep polling until id is n + 5
 * def result = call read('get.feature')
 * def current = result.response
 * print 'current: ' + current
-* def target = (current.id + 5)
+* def target = current.id + 5
 * call waitUntil target
-
-

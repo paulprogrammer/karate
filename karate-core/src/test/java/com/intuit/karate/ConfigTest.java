@@ -13,9 +13,10 @@ public class ConfigTest {
     @Test
     public void testSettingVariableViaKarateConfig() {
         String featureDir = FileUtils.getDirContaining(getClass()).getPath();
-        ScriptEnv env = new ScriptEnv("dev", new File(featureDir), null, getClass().getClassLoader());
-        ScriptContext ctx = new ScriptContext(env, null, null);        
-        ScriptValue value = Script.evalInNashorn("someConfig", ctx);
+        ScriptEnv env = new ScriptEnv("dev", new File(featureDir), null, getClass().getClassLoader(), null);
+        CallContext callContext = new CallContext(null, true);
+        ScriptContext ctx = new ScriptContext(env, callContext);        
+        ScriptValue value = Script.evalJsExpression("someConfig", ctx);
         assertEquals("someValue", value.getValue());
     }
     

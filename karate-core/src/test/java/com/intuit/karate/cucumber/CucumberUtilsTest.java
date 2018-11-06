@@ -1,5 +1,6 @@
 package com.intuit.karate.cucumber;
 
+import com.intuit.karate.CallContext;
 import com.intuit.karate.ScriptEnv;
 import java.io.File;
 import java.io.InputStream;
@@ -26,9 +27,9 @@ public class CucumberUtilsTest {
     }
     
     private ScriptEnv getEnv() {
-        return new ScriptEnv("dev", new File("."), null, getClass().getClassLoader());
+        return new ScriptEnv("dev", new File("."), null, getClass().getClassLoader(), null);
     }
-
+    
     @Test
     public void testScenario() {
         ScriptEnv env = getEnv();
@@ -49,15 +50,16 @@ public class CucumberUtilsTest {
         String stepText = step.getPriorText();
         assertEquals("Feature: simple feature file\n\n# some comment\n\nBackground:", stepText);
         assertEquals(5, step.getStartLine());
-        KarateBackend backend = CucumberUtils.getBackendWithGlue(env, null, null, false);
-        assertTrue(step.run(backend).isPass());
+        CallContext callContext = new CallContext(null, true);
+        KarateBackend backend = CucumberUtils.getBackendWithGlue(fw, callContext);
+        assertTrue(CucumberUtils.runCalledStep(step, backend).isPass());
         
         step = steps.get(1); // first scenario (non-background) step
         assertFalse(step.isBackground());
         stepText = step.getPriorText();
         assertEquals("Scenario: test", stepText);
         assertEquals(8, step.getStartLine());        
-        assertTrue(step.run(backend).isPass());
+        assertTrue(CucumberUtils.runCalledStep(step, backend).isPass());
         
         step = steps.get(2);
         stepText = step.getPriorText();
@@ -97,7 +99,7 @@ public class CucumberUtilsTest {
         fw = fw.addLine(9, "Then assert 2 == 2");
         List<String> lines = fw.getLines();
         printLines(lines);
-        assertEquals(17, lines.size());
+        assertEquals(16, lines.size());
         assertEquals(1, fw.getSections().size());
     }
     
@@ -113,7 +115,7 @@ public class CucumberUtilsTest {
         fw = fw.replaceLines(line, line, "Then assert 2 == 2");
         List<String> lines = fw.getLines();
         printLines(lines);
-        assertEquals(16, lines.size());
+        assertEquals(15, lines.size());
         assertEquals(1, fw.getSections().size());
     }
 
@@ -128,7 +130,7 @@ public class CucumberUtilsTest {
         fw = fw.replaceStep(step, "Then assert 2 == 2");
         List<String> lines = fw.getLines();
         printLines(lines);
-        assertEquals(13, lines.size());
+        assertEquals(12, lines.size());
         assertEquals("# another comment", fw.getLines().get(9));
         assertEquals("Then assert 2 == 2", fw.getLines().get(10));
         assertEquals("Then match b == { foo: 'bar'}", fw.getLines().get(11));
@@ -139,7 +141,7 @@ public class CucumberUtilsTest {
     public void testIdentifyingStepWhichIsAnHttpCall() {
         String text = "Feature:\nScenario:\n*  method post";
         ScriptEnv env = getEnv();
-        FeatureWrapper fw = FeatureWrapper.fromString(text, env, null);
+        FeatureWrapper fw = FeatureWrapper.fromString(text, env, "dummy.feature");
         printLines(fw.getLines());
         StepWrapper step = fw.getSections().get(0).getScenario().getSteps().get(0);
         logger.debug("step name: '{}'", step.getStep().getName());

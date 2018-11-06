@@ -36,7 +36,7 @@ public class Var {
     
     public Var(String name, ScriptValue value) {
         this.name = name;
-        this.value = value;
+        this.value = value == null ? ScriptValue.NULL : value;
     }
 
     public String getName() {
@@ -54,5 +54,10 @@ public class Var {
     public String getAsString() {
         return value.getAsString();
     }
+
+    @Override
+    public String toString() {
+        return value.toPrettyString(name);
+    }        
         
 }

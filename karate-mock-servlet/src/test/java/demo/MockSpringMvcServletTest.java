@@ -35,15 +35,15 @@ import org.junit.Test;
  *
  * @author pthomas3
  */
-@CucumberOptions(tags = {"~@ignore"})
+@CucumberOptions(tags = {"~@ignore", "~@mock-servlet-todo"})
 public class MockSpringMvcServletTest {
     
     @Test
     public void testSpringBootDemo() throws Exception {        
         File srcDir = new File("../karate-demo/src/test/java");
         File destDir = new File("target/test-classes");
-        // don't over-write karate-config.js
-        FileUtils.copyDirectory(srcDir, destDir, f -> !f.getName().equals("karate-config.js"), false);
+        FileUtils.copyDirectory(srcDir, destDir, 
+                f -> !f.getName().equals("karate-config.js"), false); // don't over-write karate-config.js
         System.setProperty("karate.env", "dev-mock-springmvc");
         KarateStats stats = CucumberRunner.parallel(getClass(), 5);
         assertTrue("there are scenario failures", stats.getFailCount() == 0);

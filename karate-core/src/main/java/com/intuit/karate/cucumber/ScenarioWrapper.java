@@ -54,7 +54,6 @@ public class ScenarioWrapper {
         if (cucumberBackground != null) {
             for (Step step : cucumberBackground.getSteps()) {
                 int firstLine = step.getLine();
-                int lastLine = step.getLineRange().getLast();
                 String priorText = feature.joinLines(currentLine, firstLine - 1);
                 steps.add(new StepWrapper(this, counter++, priorText, step, true));
                 currentLine = step.getLineRange().getLast();
@@ -62,11 +61,16 @@ public class ScenarioWrapper {
         }
         for (Step step : scenario.getSteps()) {
             int firstLine = step.getLine();
-            int lastLine = step.getLineRange().getLast();
             String priorText = feature.joinLines(currentLine, firstLine - 1);
             steps.add(new StepWrapper(this, counter++, priorText, step, false));
             currentLine = step.getLineRange().getLast();
         }
+    }
+    
+    public String getNameAndDescription() {
+        String name = scenario.getGherkinModel().getName();
+        String description = scenario.getGherkinModel().getDescription();
+        return name + description;
     }
 
     public void setSection(FeatureSection section) {

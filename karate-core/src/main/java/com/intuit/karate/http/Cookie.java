@@ -65,11 +65,15 @@ public class Cookie extends LinkedHashMap<String, String> {
     
     public Cookie(Map<String, String> map) {
         super(map);
-    }            
+    }
     
     public Cookie(String name, String value) {
         put(NAME, name);
         put(VALUE, value);
+    }
+    
+    public String putIfValueNotNull(String key, String value) {
+        return value == null ? null : put(key, value);
     }
 
     public String getName() {
